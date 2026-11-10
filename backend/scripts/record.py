@@ -1,7 +1,7 @@
 """Record an adsb.lol region to backend/data/recordings/<name>.jsonl.gz.
 
 Usage: python scripts/record.py --name socal-a --minutes 20 [--region socal] [--interval 10] [--force]
-Polls sequentially (single-threaded) every 10 s by default (5 s floor), 3 s timeout,
+Polls sequentially (single-threaded) every 10 s by default (10 s floor), 3 s timeout,
 honours Retry-After on HTTP 429, exponential back-off on errors.
 Military-flagged / DoD-block aircraft are excluded before anything is written.
 Data is from adsb.lol under the ODbL; see data/LICENSE-ODbL.md.
@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ghosttrack.upstream import REGIONS, UpstreamError, fetch_snapshot  # noqa: E402
 
-MIN_INTERVAL_S = 5.0  # hard floor (tests may go this low)
+MIN_INTERVAL_S = 10.0  # hard floor: one request per region per 10 s, the same etiquette as the live view
 DEFAULT_INTERVAL_S = 10.0  # polite default: one request per region per 10 s
 MAX_BACKOFF_S = 60.0
 REC_DIR = Path(__file__).resolve().parents[1] / "data" / "recordings"
@@ -102,6 +102,8 @@ def record(
     fetch=fetch_snapshot,
     sleep=time.sleep,
 ) -> Path:
+    if interval < MIN_INTERVAL_S:
+        raise ValueError(f"interval must be >= {MIN_INTERVAL_S:g} s")
     rec_dir.mkdir(parents=True, exist_ok=True)
     out = rec_dir / f"{name}.jsonl.gz"
     tmp = out.with_suffix(".tmp")

@@ -49,6 +49,21 @@ def test_entry_exposes_the_app_and_sets_serverless_defaults():
         assert "GHOSTTRACK_ADMIN_PASSWORD_HASH" not in os.environ  # admin login is the owner's choice
 
 
+def test_blank_dashboard_values_do_not_defeat_the_defaults():
+    """A variable left empty in the hosting dashboard must not stop the serverless defaults."""
+    with mock.patch.dict(os.environ):
+        for k in KEYS:
+            os.environ[k] = ""
+        spec = importlib.util.spec_from_file_location("vercel_index", ENTRY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert os.environ["GHOSTTRACK_DB"] == "/tmp/ghosttrack.db"
+        assert os.environ["GHOSTTRACK_DEMO"] == "true" and os.environ["GHOSTTRACK_MAX_UPLOAD_MB"] == "4"
+        from ghosttrack import config
+
+        assert str(config.db_path()) != "." and config.demo_mode() is True
+
+
 def test_validation_and_replay_routes_work_through_the_entry_point(entry):
     c = TestClient(entry.app)  # a guest: the demo is read-only but browsable
     v = c.get("/api/validation")

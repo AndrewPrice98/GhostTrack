@@ -158,13 +158,19 @@ def test_next_delay_honours_retry_after():
     assert recmod.next_delay(10, 10, e429) == 45
     assert recmod.next_delay(10, 10, UpstreamError("HTTP 503", status=503)) == 20
     assert recmod.next_delay(50, 10, UpstreamError("x")) == recmod.MAX_BACKOFF_S
-    assert recmod.DEFAULT_INTERVAL_S == 10.0 and recmod.MIN_INTERVAL_S == 5.0
+    assert recmod.DEFAULT_INTERVAL_S == 10.0 and recmod.MIN_INTERVAL_S == 10.0
+
+
+def test_recorder_enforces_ten_second_minimum_poll(tmp_path):
+    with pytest.raises(ValueError, match="10"):
+        recmod.record("fast", 1, "socal", 5, rec_dir=tmp_path, fetch=lambda *a, **k: None, sleep=lambda s: None)
+    assert not list(tmp_path.iterdir())
 
 
 def test_record_refuses_overwrite_without_force(tmp_path):
     (tmp_path / "x.jsonl.gz").write_bytes(b"keep")
     with pytest.raises(FileExistsError):
-        recmod.record("x", 1, "socal", 5, rec_dir=tmp_path)
+        recmod.record("x", 1, "socal", 10, rec_dir=tmp_path)
     assert (tmp_path / "x.jsonl.gz").read_bytes() == b"keep"
 
 
@@ -175,7 +181,7 @@ def test_record_cleans_leftover_tmp_and_on_interrupt(tmp_path):
         raise KeyboardInterrupt
 
     with pytest.raises(KeyboardInterrupt):
-        recmod.record("y", 1, "socal", 5, rec_dir=tmp_path, fetch=boom, sleep=lambda s: None)
+        recmod.record("y", 1, "socal", 10, rec_dir=tmp_path, fetch=boom, sleep=lambda s: None)
     assert list(tmp_path.iterdir()) == []
 
 

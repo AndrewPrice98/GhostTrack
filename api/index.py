@@ -16,11 +16,18 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 # The admin variables (GHOSTTRACK_ADMIN_PASSWORD_HASH, GHOSTTRACK_SECRET_KEY) are optional here:
 # without them visitors browse as a read-only guest and nobody can sign in.
+
+
+def _default(name: str, value: str) -> None:
+    if not os.environ.get(name, "").strip():  # a blank dashboard value counts as unset
+        os.environ[name] = value
+
+
 # Serverless defaults; any of these can be overridden in Vercel's environment settings.
-os.environ.setdefault("GHOSTTRACK_DB", "/tmp/ghosttrack.db")  # /tmp is the only writable path
-os.environ.setdefault("GHOSTTRACK_DEMO", "true")
-os.environ.setdefault("GHOSTTRACK_TRUST_PROXY", "true")  # Vercel sets X-Forwarded-For itself
-os.environ.setdefault("GHOSTTRACK_MAX_UPLOAD_MB", "4")  # Vercel caps request bodies at 4.5 MB
+_default("GHOSTTRACK_DB", "/tmp/ghosttrack.db")  # /tmp is the only writable path
+_default("GHOSTTRACK_DEMO", "true")
+_default("GHOSTTRACK_TRUST_PROXY", "true")  # Vercel sets X-Forwarded-For itself
+_default("GHOSTTRACK_MAX_UPLOAD_MB", "4")  # Vercel caps request bodies at 4.5 MB
 
 from ghosttrack.api import app  # noqa: E402
 

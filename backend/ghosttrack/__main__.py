@@ -56,8 +56,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
     if args.command == "demo":  # hosted-demo behaviour, locally: replay, read-only guests
-        os.environ.setdefault("GHOSTTRACK_DEMO", "true")
-        os.environ.setdefault("GHOSTTRACK_COOKIE_SECURE", "false")
+        for name, value in (("GHOSTTRACK_DEMO", "true"), ("GHOSTTRACK_COOKIE_SECURE", "false")):
+            if not os.environ.get(name, "").strip():  # blank counts as unset
+                os.environ[name] = value
     uvicorn.run("ghosttrack.api:app", host=args.host, port=args.port, log_level="info")
     return 0
 

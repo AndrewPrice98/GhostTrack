@@ -35,38 +35,51 @@ def load_env_file(path: Path = ENV_FILE) -> None:
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
-        os.environ.setdefault(key.strip(), value)
+        if value:  # a blank value means "unset", same as everywhere else
+            os.environ.setdefault(key.strip(), value)
 
 
 load_env_file()
 
 
-def _flag(name: str, default: bool) -> bool:
+def env(name: str, default: str = "") -> str:
+    """The variable's value, or ``default`` when it is unset or blank (an empty value, as left
+    by a hosting dashboard or a copied ``.env.example`` line, counts as unset)."""
     value = os.environ.get(name)
-    if value is None or value == "":
+    if value is None or not value.strip():
         return default
-    return value.strip().lower() in ("1", "true", "yes", "on")
+    return value.strip()
+
+
+def _flag(name: str, default: bool) -> bool:
+    value = env(name)
+    if not value:
+        return default
+    return value.lower() in ("1", "true", "yes", "on")
 
 
 def db_path() -> Path:
-    return Path(os.environ.get("GHOSTTRACK_DB", BACKEND_DIR / "data" / "ghosttrack.db"))
+    return Path(env("GHOSTTRACK_DB") or BACKEND_DIR / "data" / "ghosttrack.db")
 
 
 def admin_user() -> str:
-    return os.environ.get("GHOSTTRACK_ADMIN_USER", "admin")
+    return env("GHOSTTRACK_ADMIN_USER", "admin")
 
 
 def admin_password_hash() -> str:
-    return os.environ.get("GHOSTTRACK_ADMIN_PASSWORD_HASH", "")
+    return env("GHOSTTRACK_ADMIN_PASSWORD_HASH")
 
 
 def secret_key() -> str:
     """Key that signs session tokens. Must be long and random; rotating it logs everyone out."""
-    return os.environ.get("GHOSTTRACK_SECRET_KEY", "")
+    return env("GHOSTTRACK_SECRET_KEY")
 
 
 def session_hours() -> float:
-    return float(os.environ.get("GHOSTTRACK_SESSION_HOURS", "8"))
+    try:
+        return float(env("GHOSTTRACK_SESSION_HOURS", "8"))
+    except ValueError:
+        return 8.0
 
 
 def cookie_secure() -> bool:
@@ -92,7 +105,7 @@ def trust_proxy() -> bool:
 def live_interval_s() -> float:
     """Seconds between upstream requests per region; values below the 10 s floor are raised."""
     try:
-        value = float(os.environ.get("GHOSTTRACK_LIVE_INTERVAL_S", MIN_LIVE_INTERVAL_S))
+        value = float(env("GHOSTTRACK_LIVE_INTERVAL_S", str(MIN_LIVE_INTERVAL_S)))
     except ValueError:
         value = MIN_LIVE_INTERVAL_S
     return max(MIN_LIVE_INTERVAL_S, value)
@@ -101,10 +114,10 @@ def live_interval_s() -> float:
 def max_upload_bytes() -> int:
     """Largest accepted upload: 10 MB locally, at most 4 MB on the hosted demo or on Vercel."""
     try:
-        mb = float(os.environ.get("GHOSTTRACK_MAX_UPLOAD_MB", "10"))
+        mb = float(env("GHOSTTRACK_MAX_UPLOAD_MB", "10"))
     except ValueError:
         mb = 10.0
-    if demo_mode() or os.environ.get("VERCEL"):
+    if demo_mode() or env("VERCEL"):
         mb = min(mb, 4.0)  # Vercel Functions refuse request bodies over 4.5 MB before the app sees them
     return int(max(0.1, mb) * 1024 * 1024)
 
