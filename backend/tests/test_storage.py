@@ -217,4 +217,4 @@ def test_fixture_is_deterministic_across_hash_seeds():
         r = subprocess.run([sys.executable, str(config.BACKEND_DIR / "scripts" / "build_demo.py"), "--check"],
                            env=env, capture_output=True, text=True)
         outs.add((r.returncode, r.stdout.strip()))
-    assert outs == {(0, "demo_fixture.json is current")}
+    assert outs == {(0, "demo_fixture.json is current\napi_fixture.json is current")}

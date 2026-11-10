@@ -46,7 +46,7 @@ def alert(guest):
     """An injected alert and a non-injected one, from the seeded replay."""
     items = guest.get("/api/alerts?limit=200").json()["items"]
     assert any(a["injected"] for a in items)
-    return next(a for a in items if a["injected"])
+    return next(a for a in items if a["injected"] and a["icao"])
 
 
 def alert_count(path) -> int:
@@ -90,13 +90,25 @@ def test_live_shape(guest):
         assert key in a
 
 
-def test_live_labels_injected_and_flags(guest):
-    # Walk the cycle until a scenario is active, via the stored alerts: injected aircraft are
-    # labelled wherever they appear.
-    body = guest.get("/api/live").json()
+def test_live_labels_injected_and_flags(db_file, monkeypatch):
+    """At a moment inside an active scenario: injected aircraft are labelled and flagged."""
+    monkeypatch.setenv("GHOSTTRACK_DEMO", "true")
+    first = next(x.ts for x in demo.cycle_snapshots() if any(a.injected for a in x.aircraft))
+    now = demo.CYCLE_S * 500 + first + 20.0  # shortly after the first injected state appears
+    conn = db.connect()
+    demo.seed(conn, now)
+    conn.close()
+    app.state.feed = live.LiveFeed(clock=lambda: now)
+    try:
+        body = TestClient(app).get("/api/live").json()
+    finally:
+        del app.state.feed
+    injected = [a for a in body["aircraft"] if a["injected"]]
+    assert injected and body["injected_aircraft"] == len(injected)
     for a in body["aircraft"]:
         assert a["label"] == ("Injected test data" if a["injected"] else None)
         assert a["flagged"] == bool(a["alert_ids"])
+    assert any(a["flagged"] for a in injected)
 
 
 def test_alerts_list_shape_and_labels(guest):

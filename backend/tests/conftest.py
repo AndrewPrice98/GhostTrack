@@ -51,3 +51,15 @@ def conn(db_file):
     c = db.connect(db_file)
     yield c
     c.close()
+
+
+@pytest.fixture(autouse=True)
+def fresh_api_state():
+    """The API remembers which databases it seeded (and failures); each test starts clean."""
+    from ghosttrack import api
+
+    api._seeded.clear()
+    api._seed_failed.clear()
+    yield
+    api._seeded.clear()
+    api._seed_failed.clear()

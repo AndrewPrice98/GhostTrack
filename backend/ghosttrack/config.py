@@ -13,6 +13,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 REPO_DIR = BACKEND_DIR.parent
 RECORDINGS_DIR = BACKEND_DIR / "data" / "recordings"
 DEMO_FIXTURE = BACKEND_DIR / "data" / "demo_fixture.json"
+API_FIXTURE = BACKEND_DIR / "data" / "api_fixture.json"
 ENV_FILE = BACKEND_DIR / ".env"
 
 # Etiquette towards adsb.lol: never more than one upstream request per region per 10 s per
@@ -111,3 +112,14 @@ def max_upload_bytes() -> int:
 def max_decompressed_bytes() -> int:
     """Cap on what a gzip upload may expand to (a gzip bomb is refused, not inflated)."""
     return 4 * max_upload_bytes()
+
+
+def live_mode_enabled() -> bool:
+    """Whether ``mode=live`` (the adsb.lol view) may be requested. Default: on in demo mode only,
+    so a self-hosted install makes no upstream requests until the operator opts in."""
+    return _flag("GHOSTTRACK_LIVE", demo_mode())
+
+
+def compute_fixtures() -> bool:
+    """Dev/test escape hatch: compute the API fixture on the fly when the committed one is stale."""
+    return _flag("GHOSTTRACK_COMPUTE_FIXTURES", False)

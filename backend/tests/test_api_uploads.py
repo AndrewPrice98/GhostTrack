@@ -56,7 +56,7 @@ def test_end_to_end_on_an_empty_db(admin, db_file, injected_recording):
     listed = admin.get("/api/alerts?injected=true&limit=200").json()
     assert listed["total"] >= 1
     a = next(x for x in listed["items"] if x["detection_id"] in scenario_by_id("teleport").expected)
-    assert a["source"] == "upload" and a["label"] == "Injected test data"
+    assert a["source"] == "upload" and a["label"] == "Injected test data (as declared by upload)"
 
     detail = admin.get(f"/api/alerts/{a['id']}").json()
     assert detail["evidence"] and detail["track"], "an uploaded alert keeps its track for the evidence pack"
@@ -89,7 +89,8 @@ def test_uploading_twice_does_not_duplicate_alerts(admin, injected_recording):
 def test_clean_recording_makes_no_injected_alerts(admin, clean_recording):
     res = post(admin, clean_recording).json()
     assert res["injected_alerts"] == 0
-    assert all(not a["injected"] for a in admin.get("/api/alerts?limit=200").json()["items"])
+    items = admin.get("/api/alerts?limit=200").json()["items"]
+    assert all(not a["injected"] and a["label"] == "Uploaded recording (unverified)" for a in items)
 
 
 def test_uploaded_alerts_survive_pruning(admin, db_file, injected_recording):

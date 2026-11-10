@@ -1,2 +1,3 @@
 backend/data/demo_fixture.json text eol=lf
 *.gz binary
+backend/data/api_fixture.json text eol=lf

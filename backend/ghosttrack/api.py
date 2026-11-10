@@ -22,20 +22,20 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from ghosttrack import __version__, auth, config, db, demo, exports, icao, live, uploads, upstream, validate
+from ghosttrack import __version__, auth, config, db, demo, exports, fixtures, icao, live, uploads, upstream
 from ghosttrack.catalog import load_catalog
-from ghosttrack.geo import haversine_nm
+from ghosttrack.fixtures import INJECTED_LABEL, scenario_out
 from ghosttrack.scenarios import GAP_SCENARIOS, SCENARIOS, scenario_by_id
 
 log = logging.getLogger("ghosttrack.api")
 
-INJECTED_LABEL = "Injected test data"
+UPLOAD_LABEL = "Uploaded recording (unverified)"
+UPLOAD_INJECTED_LABEL = "Injected test data (as declared by upload)"
+SMALL_BODY_BYTES = 64 * 1024  # every POST/PUT/PATCH except the recording upload
+SEED_FAILURE_TTL_S = 60.0
 MAX_NOTES = 2000
 MAX_LIMIT = 200
 FLAG_WINDOW_S = 600.0  # an alert touching the last ten minutes marks its aircraft as flagged
-REPLAY_MAX_FRAMES = 400
-REPLAY_NEARBY_NM = 40.0
-REPLAY_NEARBY_MAX = 12
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -50,12 +50,48 @@ SECURITY_HEADERS = {
 DOWNLOAD_HTML_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox"
 
 
+class DataUnavailable(Exception):
+    """The demo database could not be seeded (recently); data routes answer 503 meanwhile."""
+
+
+_seed_lock = threading.Lock()
+_seeded: set[str] = set()  # database paths seeded by this process
+_seed_failed: dict[str, float] = {}  # database path -> monotonic time of the last failure
+
+
+def ensure_data() -> None:
+    """Seed the demo database on first use (once per process and database, under a lock).
+
+    A failure is logged once and remembered for SEED_FAILURE_TTL_S, during which data routes
+    answer 503 without trying again. A no-op outside demo mode.
+    """
+    if not config.demo_mode():
+        return
+    key = str(config.db_path())
+    if key in _seeded:
+        return
+    with _seed_lock:
+        if key in _seeded:
+            return
+        failed = _seed_failed.get(key)
+        if failed is not None and time.monotonic() - failed < SEED_FAILURE_TTL_S:
+            raise DataUnavailable
+        try:
+            demo.ensure_seeded()
+        except Exception:
+            log.exception("Seeding the demo database failed; retrying in %.0f s", SEED_FAILURE_TTL_S)
+            _seed_failed[key] = time.monotonic()
+            raise DataUnavailable from None
+        _seed_failed.pop(key, None)
+        _seeded.add(key)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    if config.demo_mode():
-        await run_in_threadpool(demo.ensure_seeded)
-        # Warm the validation figures (a few seconds) so the first visitor to /detections doesn't wait.
-        threading.Thread(target=validation_raw, name="warm-validation", daemon=True).start()
+    try:  # a head start; the first request would seed otherwise
+        await run_in_threadpool(ensure_data)
+    except DataUnavailable:
+        pass
     yield
 
 
@@ -64,6 +100,7 @@ app = FastAPI(
     title="GhostTrack API",
     version=__version__,
     description="Plausibility checks on decoded ADS-B data. Not a certified surveillance system.",
+    docs_url=None, redoc_url=None, openapi_url=None,  # served below, never to guests
 )
 
 
@@ -111,22 +148,28 @@ class BodyLimitMiddleware:
         self.app = app
 
     @staticmethod
-    def _limit() -> int:
-        return config.max_upload_bytes() + MULTIPART_OVERHEAD
+    def _limit(scope) -> int:
+        """64 KiB everywhere except the recording upload, which gets the upload cap."""
+        if scope["method"] == "POST" and scope["path"].rstrip("/") == "/api/recordings":
+            return config.max_upload_bytes() + MULTIPART_OVERHEAD
+        return SMALL_BODY_BYTES
 
     @staticmethod
-    async def _reject(send) -> None:
-        message = f"Request too large (max {config.max_upload_bytes() // (1024 * 1024)} MB)"
+    async def _reject(send, limit: int) -> None:
+        if limit == SMALL_BODY_BYTES:
+            message = f"Request too large (max {SMALL_BODY_BYTES // 1024} KiB)"
+        else:
+            message = f"Request too large (max {config.max_upload_bytes() // (1024 * 1024)} MB)"
         await JSONResponse({"detail": message}, status_code=413)({"type": "http"}, _noop_receive, send)
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["method"] not in ("POST", "PUT", "PATCH"):
             await self.app(scope, receive, send)
             return
-        limit = self._limit()
+        limit = self._limit(scope)
         declared = dict(scope["headers"]).get(b"content-length", b"")
         if declared.isdigit() and int(declared) > limit:
-            await self._reject(send)
+            await self._reject(send, limit)
             return
 
         received = 0
@@ -155,7 +198,7 @@ class BodyLimitMiddleware:
         except _TooLarge:
             pass
         if exceeded and not sent_any:
-            await self._reject(send)
+            await self._reject(send, limit)
 
 
 async def _noop_receive():
@@ -164,6 +207,18 @@ async def _noop_receive():
 
 app.add_middleware(BodyLimitMiddleware)
 app.add_middleware(SecurityHeaders)
+
+
+@app.exception_handler(DataUnavailable)
+async def data_unavailable(_request: Request, _exc: DataUnavailable):
+    return JSONResponse({"detail": "Demo data is not available yet"}, status_code=503,
+                        headers={"Retry-After": str(int(SEED_FAILURE_TTL_S))})
+
+
+@app.exception_handler(fixtures.FixtureUnavailable)
+async def fixture_unavailable(_request: Request, _exc: fixtures.FixtureUnavailable):
+    log.error("Precomputed API fixture is missing or stale")
+    return JSONResponse({"detail": "Precomputed data is not available"}, status_code=503)
 
 
 @app.exception_handler(Exception)
@@ -179,6 +234,7 @@ async def last_resort(request: Request, exc: Exception):
 
 
 def get_conn() -> Iterator[sqlite3.Connection]:
+    ensure_data()
     conn = db.connect()
     try:
         if config.demo_mode():
@@ -201,13 +257,13 @@ def get_feed() -> live.LiveFeed:
 
 # -- validation helpers -------------------------------------------------------------------------
 
-_DIGITS = re.compile(r"^[0-9]{1,9}$")
-_HEX6 = re.compile(r"^[0-9a-fA-F]{6}$")
-_SCENARIO = re.compile(r"^[a-z0-9_]{1,40}$")
+_DIGITS = re.compile(r"[0-9]{1,9}")
+_HEX6 = re.compile(r"[0-9a-fA-F]{6}")
+_SCENARIO = re.compile(r"[a-z0-9_]{1,40}")
 
 
 def alert_dep(alert_id: str, conn: Conn) -> dict:
-    found = db.get_alert(conn, int(alert_id)) if _DIGITS.match(alert_id) else None  # junk ids: 404
+    found = db.get_alert(conn, int(alert_id)) if _DIGITS.fullmatch(alert_id) else None  # junk ids: 404
     if found is None:
         raise HTTPException(404, "alert not found")
     return found
@@ -240,6 +296,13 @@ def _title(detection_id: str) -> str:
     return load_catalog()["by_id"].get(detection_id, {}).get("title", detection_id)
 
 
+def alert_label(source: str, injected: bool) -> str | None:
+    """The UI label. Uploaded data is unverified, and its ``injected`` claim is the uploader's."""
+    if source == "upload":
+        return UPLOAD_INJECTED_LABEL if injected else UPLOAD_LABEL
+    return INJECTED_LABEL if injected else None
+
+
 def alert_out(a: dict) -> dict:
     det = load_catalog()["by_id"].get(a["detection_id"], {})
     return {
@@ -248,22 +311,22 @@ def alert_out(a: dict) -> dict:
         "callsign": a["callsign"], "first_ts": a["first_ts"], "last_ts": a["last_ts"],
         "confidence": a["confidence"], "explanation": a["explanation"], "status": a["status"],
         "notes": a["notes"], "injected": a["injected"],
-        "label": INJECTED_LABEL if a["injected"] else None,
+        "label": alert_label(a["source"], a["injected"]),
         "benign_causes": exports._benign(a, det),
     }
 
 
-def _point_out(p: dict) -> dict:
+def _point_out(p: dict, source: str = "recorded") -> dict:
     inj = bool(p.get("injected"))
     return {"ts": p["ts"], "icao": p["icao"], "lat": p["lat"], "lon": p["lon"], "alt": p.get("alt_baro_ft"),
             "gs": p.get("gs_kt"), "track": p.get("track_deg"), "injected": inj,
-            "label": INJECTED_LABEL if inj else None}
+            "label": alert_label(source, inj)}
 
 
 def alert_detail(conn: sqlite3.Connection, a: dict) -> dict:
     out = alert_out(a)
     out["evidence"] = [{**e, "unit": exports._unit(e.get("field", ""))} for e in a["evidence"]]
-    out["track"] = [_point_out(p) for p in db.alert_track(conn, a)]
+    out["track"] = [_point_out(p, a["source"]) for p in db.alert_track(conn, a)]
     return out
 
 
@@ -347,6 +410,8 @@ def get_live(
         raise HTTPException(422, f"unknown region (allowed: {', '.join(sorted(upstream.REGIONS))})")
     if mode not in live.MODES:
         raise HTTPException(422, f"unknown mode (allowed: {', '.join(live.MODES)})")
+    if mode == "live" and not config.live_mode_enabled():
+        raise HTTPException(403, "Live mode is disabled on this server (set GHOSTTRACK_LIVE=true)")
     view = live.get_traffic(mode, region, connect=db.connect, feed=feed)
     flags: dict[str, list[int]] = {}
     try:
@@ -361,6 +426,7 @@ def get_live(
         log.warning("Could not read alerts for the live view", exc_info=True)
     for k, v in live.response_headers().items():  # the only route that carries this header
         response.headers[k] = v
+    response.headers["Vary"] = "Cookie"  # a shared cache must not mix the guest and the admin
     return {
         "source": view["source"], "notice": view["notice"], "mode": view["mode"], "region": view["region"],
         "ts": view["ts"], "aircraft": [_aircraft_out(a, flags) for a in view["aircraft"]],
@@ -375,7 +441,7 @@ def get_live(
 
 @protected.get("/api/aircraft/{address}")
 def get_aircraft(address: str, conn: Conn):
-    if not _HEX6.match(address):
+    if not _HEX6.fullmatch(address):
         raise HTTPException(404, "aircraft not found")
     addr = address.lower()
     track = db.aircraft_track(conn, addr)
@@ -408,6 +474,7 @@ def get_aircraft(address: str, conn: Conn):
 def list_alerts(
     conn: Conn,
     detection: Annotated[str | None, Query(max_length=16)] = None,
+    q: Annotated[str | None, Query(max_length=32)] = None,
     severity: Literal["info", "low", "medium", "high"] | None = None,
     injected: bool | None = None,
     status: Literal["new", "info", "acknowledged", "dismissed"] | None = None,
@@ -420,7 +487,7 @@ def list_alerts(
     if detection is not None and detection not in _detection_ids():
         raise HTTPException(422, "unknown detection id")
     items, total = db.query_alerts(
-        conn, detection=detection, severity=severity, injected=injected, status=status,
+        conn, detection=detection, q=q, severity=severity, injected=injected, status=status,
         start_ts=_iso(start, "start"), end_ts=_iso(end, "end"), sort=sort, limit=limit, offset=offset)
     return {"items": [alert_out(a) for a in items], "total": total, "limit": limit, "offset": offset}
 
@@ -458,22 +525,12 @@ async def patch_alert(_w: Annotated[str, Writer], alert: AlertDep, request: Requ
 
 # Validation and detections ---------------------------------------------------------------------------------
 
-_validation_lock = threading.Lock()
-_validation_cache: dict[str, Any] = {}
-
-
 def validation_raw() -> dict[str, Any]:
-    """Scenario validation, gap validation and false-positive measurement over the committed
-    recordings. Deterministic, so computed once per process (a few seconds)."""
-    with _validation_lock:
-        if not _validation_cache:
-            _validation_cache.update(
-                results=validate.run_validation(), gaps=validate.run_gap_validation(),
-                fps=validate.measure_false_positives())
-        return _validation_cache
+    """Validation results and false-positive measurements, read from the precomputed fixture."""
+    return fixtures.validation_raw()
 
 
-def _result_out(r: validate.ValidationResult) -> dict:
+def _result_out(r) -> dict:
     return {"scenario": r.scenario, "expected": list(r.expected), "fired": list(r.fired), "passed": r.passed,
             "time_to_detect_s": r.time_to_detect_s, "collateral": r.collateral, "gap": r.gap,
             "injected": True, "label": INJECTED_LABEL}
@@ -513,67 +570,22 @@ def get_validation():
 # Scenarios ------------------------------------------------------------------------------------------------------
 
 
-def _scenario_out(s) -> dict:
-    return {"id": s.id, "title": s.title, "simulates": s.simulates, "reference": s.reference,
-            "expected": list(s.expected), "gap": s.gap, "injected": True, "label": INJECTED_LABEL}
-
-
 @protected.get("/api/scenarios")
 def get_scenarios():
     scheduled = dict(demo.SCHEDULE)
-    return {"scenarios": [{**_scenario_out(s), "demo_offset_s": scheduled.get(s.id)}
+    return {"scenarios": [{**scenario_out(s), "demo_offset_s": scheduled.get(s.id)}
                           for s in (*SCENARIOS, *GAP_SCENARIOS)]}
-
-
-def _frame_aircraft(a, injected: bool) -> dict:
-    return {"icao": a.icao, "callsign": a.callsign, "lat": round(a.lat, 4), "lon": round(a.lon, 4),
-            "alt": a.alt_baro_ft, "gs": a.gs_kt, "track": a.track_deg, "injected": injected,
-            "label": INJECTED_LABEL if injected else None}
-
-
-@lru_cache(maxsize=16)
-def _replay(name: str) -> dict:
-    """Frames for the scenario player: the scenario injected into the first clean recording,
-    keeping only the scenario's aircraft and a few neighbours, at most REPLAY_MAX_FRAMES frames."""
-    from ghosttrack.detections import analyse
-
-    scenario = scenario_by_id(name)
-    base = validate.load_recording(validate.RECORDINGS_DIR / validate.DEFAULT_RECORDING)
-    run = scenario.apply(base)
-    mine = set(run.addresses)
-    snaps = [s for s in run.snapshots if s.ts >= run.inject_ts - 120.0]
-    stride = max(1, -(-len(snaps) // REPLAY_MAX_FRAMES))
-    snaps = snaps[::stride]
-    t0 = snaps[0].ts
-    frames = []
-    for s in snaps:
-        ours = [a for a in s.aircraft if a.icao in mine or a.injected]
-        pts = [(a.lat, a.lon) for a in ours]
-        ranked = sorted(
-            ((min((haversine_nm(a.lat, a.lon, la, lo) for la, lo in pts), default=float("inf")), a)
-             for a in s.aircraft if a not in ours), key=lambda x: x[0])
-        nearby = [a for d, a in ranked[:REPLAY_NEARBY_MAX] if d <= REPLAY_NEARBY_NM]
-        frames.append({"t": round(s.ts - t0, 1),
-                       "aircraft": [_frame_aircraft(a, True) for a in ours]
-                       + [_frame_aircraft(a, bool(a.injected)) for a in nearby]})
-    analysis = analyse(run.snapshots)
-    events = [{"t": round(f.ts_first - t0, 1), "detection_id": f.detection_id, "title": _title(f.detection_id),
-               "severity": f.severity, "icao": f.icao, "confidence": f.confidence, "explanation": f.explanation}
-              for f in validate._attributed(analysis.findings, run.addresses)]
-    return {"scenario": _scenario_out(scenario), "injected": True, "label": INJECTED_LABEL,
-            "notice": exports.INJECTED_BANNER, "inject_t": round(run.inject_ts - t0, 1),
-            "addresses": sorted(mine), "frames": frames, "events": events}
 
 
 @protected.get("/api/scenarios/{name}/replay")
 def get_replay(name: str):
     try:
-        if not _SCENARIO.match(name):
+        if not _SCENARIO.fullmatch(name):
             raise KeyError(name)
         scenario_by_id(name)
     except KeyError:
         raise HTTPException(404, "scenario not found") from None
-    return _replay(name)
+    return fixtures.replay(name)
 
 
 # Exports ----------------------------------------------------------------------------------------------------------
@@ -632,3 +644,31 @@ def upload_recording(_w: Annotated[str, Writer], conn: Conn,
 
 
 app.include_router(protected)
+
+
+# API description: for the admin only; the interactive pages are off in demo mode ------------------------------
+
+
+@app.get("/api/openapi.json", include_in_schema=False)
+def openapi_schema(_w: Annotated[str, Writer]):
+    return app.openapi()
+
+
+def _docs_page(kind: str):
+    if config.demo_mode():
+        raise HTTPException(404, "Not found")
+    from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+
+    if kind == "docs":
+        return get_swagger_ui_html(openapi_url="/api/openapi.json", title="GhostTrack API")
+    return get_redoc_html(openapi_url="/api/openapi.json", title="GhostTrack API")
+
+
+@app.get("/docs", include_in_schema=False)
+def docs_page():
+    return _docs_page("docs")
+
+
+@app.get("/redoc", include_in_schema=False)
+def redoc_page():
+    return _docs_page("redoc")

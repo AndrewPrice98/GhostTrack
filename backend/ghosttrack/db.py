@@ -323,6 +323,7 @@ def query_alerts(
     injected: bool | None = None,
     status: str | None = None,
     icao: str | None = None,
+    q: str | None = None,
     start_ts: float | None = None,
     end_ts: float | None = None,
     sort: str = "first_ts",
@@ -337,6 +338,10 @@ def query_alerts(
         if val is not None:
             where.append(f"{col} = ?")
             args.append(val)
+    if q:  # callsign or address substring; wildcards in the input are matched literally
+        like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where.append("(callsign LIKE ? ESCAPE '\\' OR icao LIKE ? ESCAPE '\\')")
+        args += [like, like]
     if injected is not None:
         where.append("injected = ?")
         args.append(int(injected))
