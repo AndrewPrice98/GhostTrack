@@ -175,6 +175,16 @@ categories:
       ceilings above any civil transport (ground speed records near 720 kt) but below supersonic
       flight, which is prohibited for civil aircraft over the US (14 CFR 91.817).
 
+validation:
+  # False-positive budget on the clean committed recordings: findings per hour of recorded
+  # traffic, counting only severity >= budget_min_severity. Rule: max observed rate over all
+  # recordings x budget_headroom, but never below budget_floor_per_hour. The measured numbers
+  # and date are in DECISIONS.md; test_false_positive_budget fails CI when exceeded.
+  budget_min_severity: medium
+  budget_headroom: 1.5
+  budget_floor_per_hour: 1.0
+  fp_budget_per_hour: 1.0
+
 detections:
   - id: GT-001
     title: Impossible ground speed for the emitter category

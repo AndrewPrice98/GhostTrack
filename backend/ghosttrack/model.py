@@ -29,6 +29,7 @@ class State:
     nac_p: int | None
     seen_pos_s: float | None
     rssi: float | None
+    injected: bool = False  # True only on synthetic scenario data; upstream always sets False
 
     def to_dict(self) -> dict:
         return asdict(self)

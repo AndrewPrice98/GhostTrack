@@ -267,6 +267,7 @@ def normalize_record(rec, stats: Counter) -> State | None:
         nac_p=_int(rec.get("nac_p"), 0, 11),
         seen_pos_s=_opt(rec, "seen_pos", 0, 86400, "bad_seen_pos", stats),
         rssi=_opt(rec, "rssi", -200, 50, "bad_rssi", stats),
+        injected=False,  # upstream data is never injected test data
     )
 
 
