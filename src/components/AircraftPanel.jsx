@@ -87,7 +87,9 @@ export default function AircraftPanel({ aircraft, gone, onClose, focusOnOpen = t
           <div className="chips">
             {aircraft.flagged && <FlaggedTag />}
             {aircraft.injected && <InjectedTag />}
-            {!aircraft.flagged && !aircraft.injected && <span className="chip neutral">No alerts</span>}
+            {!aircraft.flagged && !aircraft.injected && (
+              <span className="chip neutral">{(aircraft.alert_ids || []).length ? 'Low-severity findings only' : 'No alerts'}</span>
+            )}
           </div>
         </div>
         <div className="panel-tools">
@@ -125,10 +127,16 @@ export default function AircraftPanel({ aircraft, gone, onClose, focusOnOpen = t
 
       <section className="panel-checks" aria-labelledby="ac-checks-title">
         <h3 id="ac-checks-title">Failing checks</h3>
-        {!aircraft.flagged && (
+        {!aircraft.flagged && !(aircraft.alert_ids || []).length && (
           <p className="muted small">
             No detection fired for this aircraft in the last {FLAG_WINDOW_MIN} minutes. Checks that lack their inputs
             (for example no altitude) are not evaluated rather than counted as clean.
+          </p>
+        )}
+        {!aircraft.flagged && (aircraft.alert_ids || []).length > 0 && (
+          <p className="muted small">
+            Only low-severity or informational findings in the last {FLAG_WINDOW_MIN} minutes. They are listed here and in the
+            alert queue, but the map rings an aircraft only for medium or higher.
           </p>
         )}
         {alerts.loading && !alerts.items.length && <p className="muted small" role="status">Loading the alerts…</p>}

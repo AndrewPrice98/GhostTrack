@@ -107,7 +107,7 @@ def test_live_labels_injected_and_flags(db_file, monkeypatch):
     assert injected and body["injected_aircraft"] == len(injected)
     for a in body["aircraft"]:
         assert a["label"] == ("Injected test data" if a["injected"] else None)
-        assert a["flagged"] == bool(a["alert_ids"])
+        assert a["flagged"] <= bool(a["alert_ids"])  # a ring needs an alert; an alert may be too minor to ring
     assert any(a["flagged"] for a in injected)
 
 
@@ -456,3 +456,43 @@ def test_demo_upload_cap_is_4_mb(monkeypatch):
     assert config.max_upload_bytes() == 2 * 1024 * 1024
 
 
+# ------------------------------------------------------------------ the map rings medium and above only
+
+
+def _live_alert(icao: str, severity: str, ts: float, detection: str = "GT-010") -> int:
+    conn = db.connect()
+    try:
+        _, alert_id = db.upsert_alert_id(conn, {
+            "source": "live", "detection_id": detection, "severity": severity, "icao": icao, "callsign": None,
+            "first_ts": ts - 30, "last_ts": ts, "injected": False, "confidence": 0.5, "explanation": "x",
+            "benign_causes": [], "evidence": [],
+        })
+        return alert_id
+    finally:
+        conn.close()
+
+
+def test_only_medium_and_above_findings_ring_a_live_aircraft(guest, fake_feed):
+    import time
+
+    now = time.time()
+    low = _live_alert("a061d9", "low", now)
+    info = _live_alert("a061d9", "info", now, "GT-008")
+    body = guest.get("/api/live?mode=live").json()
+    me = next(a for a in body["aircraft"] if a["icao"] == "a061d9")
+    # Low and info findings stay attached to the aircraft (alert lists, side panel) but draw no ring.
+    assert {low, info} <= set(me["alert_ids"]) and me["flagged"] is False
+    assert all(a["icao"] != "a061d9" for a in body["aircraft"] if a["flagged"])
+    before = body["flagged_aircraft"]
+    medium = _live_alert("a061d9", "medium", now, "GT-001")
+    body = guest.get("/api/live?mode=live").json()
+    me = next(a for a in body["aircraft"] if a["icao"] == "a061d9")
+    assert me["flagged"] is True and {low, info, medium} <= set(me["alert_ids"])
+    assert body["flagged_aircraft"] == before + 1
+
+
+@pytest.mark.parametrize("severity,rings", [("info", False), ("low", False), ("medium", True), ("high", True)])
+def test_ring_rule_by_severity(severity, rings):
+    from ghosttrack import api
+
+    assert api.rings_aircraft({"severity": severity}) is rings

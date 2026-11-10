@@ -242,7 +242,7 @@ export default function LiveMap() {
   return (
     <div className="page live-page">
       <PageHead eyebrow="Southern California · 60 NM around LAX" title="Live map"
-        lead="Every aircraft in the picture is run through ten plausibility checks. Flagged aircraft get a red ring; injected test aircraft are hatched and labelled.">
+        lead="Every aircraft in the picture is run through ten plausibility checks. Aircraft with a medium or higher finding get a red ring (low-severity findings are listed, not ringed); injected test aircraft are hatched and labelled.">
         <ModeToggle mode={mode} onChange={changeMode} />
       </PageHead>
       {mode === 'live' && (

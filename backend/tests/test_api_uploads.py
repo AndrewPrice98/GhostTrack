@@ -217,3 +217,67 @@ def test_missing_file_field_is_422(admin):
 def test_failed_upload_stores_nothing(admin, db_file):
     post(admin, b"\x00garbage")
     assert admin.get("/api/alerts").json()["total"] == 0
+
+
+# ------------------------------------------------------------------ exports and labels keep the upload's provenance
+
+
+def test_exports_of_an_uploaded_alert_say_unverified_through_the_api(admin, injected_recording):
+    post(admin, injected_recording)
+    a = next(x for x in admin.get("/api/alerts?limit=200").json()["items"] if x["source"] == "upload")
+    pack = admin.get(f"/api/alerts/{a['id']}/evidence.json").json()
+    assert pack["origin_label"] == a["label"] == "Injected test data (as declared by upload)"
+    assert "adsb.lol" not in pack["data_source"]
+    html = admin.get(f"/api/alerts/{a['id']}/evidence.html").text
+    assert "as declared by upload" in html and "adsb.lol" not in html
+    summary = admin.get("/api/reports/summary.md").text
+    assert "from **uploaded recordings (unverified)**" in summary
+    assert "0 from real/recorded traffic" in summary  # nothing else was loaded: uploads are not real traffic
+
+
+def test_aircraft_label_follows_the_upload_origin(admin, injected_recording):
+    post(admin, injected_recording)
+    items = admin.get("/api/alerts?limit=200").json()["items"]
+    addr = next(x["icao"] for x in items if x["icao"] and x["source"] == "upload")
+    body = admin.get(f"/api/aircraft/{addr}").json()
+    assert body["label"] == "Injected test data (as declared by upload)"
+    assert all(p["label"] in (None, "Injected test data (as declared by upload)", "Uploaded recording (unverified)")
+               for p in body["track"])
+
+
+def test_aircraft_label_rules():
+    from ghosttrack import api
+
+    rec = {"snapshot_source": "recorded", "injected": False}
+    up = {"snapshot_source": "upload", "injected": False}
+    assert api._aircraft_label([rec], []) is None
+    assert api._aircraft_label([rec, {**rec, "injected": True}], []) == "Injected test data"
+    assert api._aircraft_label([up], []) == "Uploaded recording (unverified)"
+    assert api._aircraft_label([{**up, "injected": True}], []) == "Injected test data (as declared by upload)"
+    assert api._aircraft_label([], [{"source": "upload", "injected": False}]) == "Uploaded recording (unverified)"
+    assert api._aircraft_label([], [{"source": "upload", "injected": True}]) == "Injected test data (as declared by upload)"
+    assert api._aircraft_label([], [{"source": "recorded", "injected": True}]) == "Injected test data"
+
+
+def test_guest_upload_is_refused_before_the_body_is_parsed(db_file, monkeypatch):
+    from starlette.requests import Request
+
+    monkeypatch.setenv("GHOSTTRACK_DEMO", "true")
+    parsed = []
+    original = Request.form
+
+    def spy(self, *a, **k):
+        parsed.append(1)
+        return original(self, *a, **k)
+
+    monkeypatch.setattr(Request, "form", spy)
+    guest = TestClient(app)
+    assert guest.get("/api/health").status_code == 200
+    r = post(guest, b"x" * (1024 * 1024))
+    assert r.status_code == 403
+    assert parsed == [], "the multipart body was parsed for a guest"
+    # The same request from the admin does parse the form.
+    c = TestClient(app)
+    assert c.post("/api/auth/login", json={"username": TEST_USER, "password": TEST_PASSWORD}).status_code == 200
+    assert post(c, b"x").status_code in (400, 415)
+    assert parsed == [1]

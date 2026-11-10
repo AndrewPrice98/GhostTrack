@@ -3,7 +3,7 @@ import { api } from '../api.js'
 import {
   Chip, ErrorState, Icon, InjectedTag, Loading, PageHead, SeverityChip, useAsync, usePageTitle,
 } from '../components/ui.jsx'
-import { fmtNumber, fmtTimeToDetect } from '../lib.js'
+import { fmtNumber, fmtTimeToDetect, plural } from '../lib.js'
 import { fmtThreshold, humanKey } from '../replay.js'
 
 const SCOPES = { track: 'Per aircraft track', fleet: 'Across all aircraft' }
@@ -215,8 +215,9 @@ function Validation({ v }) {
               </table>
             </div>
             <p className="muted small">
-              Measured over {fmtNumber(hours, 2)} hours and {fmtNumber(tracks)} tracks in total. A short, quiet sample is a thin
-              baseline: it shows the thresholds are not tuned to alert on ordinary traffic, not what a busy day looks like.
+              Measured over {fmtNumber(hours, 2)} hours and {fmtNumber(tracks)} tracks in total. The {plural(fp.recordings.length, 'recording')} come from one
+              region and one day (including a busy morning), so they are still a thin baseline: they show the thresholds are not
+              tuned to alert on ordinary traffic, not what any other day looks like.
             </p>
           </>
         )}

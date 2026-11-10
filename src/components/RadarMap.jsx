@@ -313,7 +313,7 @@ export function Legend() {
       <p className="legend-title">Legend</p>
       <ul>
         {Object.entries(SOURCES).map(([k, s]) => item(`src-${k}`, s.label))}
-        {item('src-adsb flagged', 'Flagged (red ring)')}
+        {item('src-adsb flagged', 'Flagged: medium or higher (red ring)')}
         {item('src-adsb injected', 'Injected test data (hatched)', true)}
       </ul>
     </div>

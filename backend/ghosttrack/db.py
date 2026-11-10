@@ -417,7 +417,7 @@ def aircraft_track(conn: sqlite3.Connection, icao: str, limit: int = 400) -> lis
         d = json.loads(row["data_json"])
         for a in d["aircraft"]:
             if a.get("icao") == icao:
-                best.setdefault(row["source"], []).append({"ts": d["ts"], **a})
+                best.setdefault(row["source"], []).append({"ts": d["ts"], "snapshot_source": row["source"], **a})
     if not best:
         return []
     src = max(best, key=lambda k: best[k][-1]["ts"])  # the source that saw it most recently

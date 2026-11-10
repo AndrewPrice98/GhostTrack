@@ -27,7 +27,7 @@ def admin(db_file):
     return c
 
 
-# ------------------------------------------------------------------ I1: precomputed fixtures
+# ------------------------------------------------------------------ precomputed fixtures
 
 
 def test_committed_api_fixture_equals_a_fresh_build():
@@ -69,7 +69,7 @@ def test_stale_fixture_is_503_unless_compute_is_enabled(demo_client, monkeypatch
     assert demo_client.get("/api/validation").status_code == 200
 
 
-# ------------------------------------------------------------------ I2: lazy, idempotent seeding
+# ------------------------------------------------------------------ lazy, idempotent seeding
 
 
 def test_seeding_happens_once_across_requests(demo_client, monkeypatch):
@@ -147,7 +147,7 @@ def test_small_cap_applies_to_other_paths_with_the_recordings_prefix(admin):
     assert admin.post("/api/recordings/extra", content=b"x" * 100_000).status_code == 413
 
 
-# ------------------------------------------------------------------ minors
+# ------------------------------------------------------------------ routes, switches and search
 
 
 @pytest.mark.parametrize("path", ["/api/alerts/1%0A", "/api/aircraft/a061d9%0A", "/api/scenarios/teleport%0A/replay"])
@@ -243,3 +243,38 @@ def test_vercel_caps_the_upload_limit(monkeypatch):
     monkeypatch.setenv("VERCEL", "1")  # Vercel Functions refuse bodies over 4.5 MB
     assert config.max_upload_bytes() == 4 * 1024 * 1024
     assert TestClient(app).get("/api/health").json()["max_upload_mb"] == 4
+
+
+# ------------------------------------------------------------------ fixtures go stale with any manifest recording
+
+
+def _copy_recordings(tmp_path):
+    import shutil
+
+    dest = tmp_path / "recordings"
+    shutil.copytree(config.RECORDINGS_DIR, dest)
+    return dest
+
+
+def test_inputs_digest_covers_every_recording_the_false_positive_measurement_reads(tmp_path, monkeypatch):
+    demo_names = set(demo.DEMO_RECORDINGS)
+    manifest_names = {p.name for p in validate.manifest_recordings()}
+    daytime = sorted(manifest_names - demo_names)
+    assert daytime, "the measurement reads recordings that the demo cycle does not"
+    before = demo.inputs_digest()
+    rec = _copy_recordings(tmp_path)
+    monkeypatch.setattr(config, "RECORDINGS_DIR", rec)
+    assert demo.inputs_digest() == before  # a faithful copy digests the same
+    with open(rec / daytime[0], "ab") as fh:
+        fh.write(b"x")
+    assert demo.inputs_digest() != before
+
+
+def test_a_changed_daytime_recording_makes_the_api_fixture_stale_503(demo_client, tmp_path, monkeypatch):
+    rec = _copy_recordings(tmp_path)
+    monkeypatch.setattr(config, "RECORDINGS_DIR", rec)
+    assert demo_client.get("/api/validation").status_code == 200  # an identical copy is still current
+    daytime = sorted({p.name for p in validate.manifest_recordings()} - set(demo.DEMO_RECORDINGS))[0]
+    with open(rec / daytime, "ab") as fh:
+        fh.write(b"x")
+    assert demo_client.get("/api/validation").status_code == 503

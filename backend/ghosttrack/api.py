@@ -17,25 +17,29 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Annotated, Any, Iterator, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from ghosttrack import __version__, auth, config, db, demo, exports, fixtures, icao, live, uploads, upstream
 from ghosttrack.catalog import load_catalog
+from ghosttrack.detections.base import SEVERITIES
+from ghosttrack.exports import alert_label
 from ghosttrack.fixtures import INJECTED_LABEL, scenario_out
 from ghosttrack.scenarios import GAP_SCENARIOS, SCENARIOS, scenario_by_id
 
 log = logging.getLogger("ghosttrack.api")
 
-UPLOAD_LABEL = "Uploaded recording (unverified)"
-UPLOAD_INJECTED_LABEL = "Injected test data (as declared by upload)"
 SMALL_BODY_BYTES = 64 * 1024  # every POST/PUT/PATCH except the recording upload
 SEED_FAILURE_TTL_S = 60.0
 MAX_NOTES = 2000
 MAX_LIMIT = 200
-FLAG_WINDOW_S = 600.0  # an alert touching the last ten minutes marks its aircraft as flagged
+FLAG_WINDOW_S = 600.0  # an alert touching the last ten minutes marks its aircraft
+# Only findings of this severity or higher make an aircraft "flagged" (the red ring on the live map).
+# Low and info findings stay visible in the alert lists and in the aircraft's alert_ids, but do not
+# ring a real aircraft: daytime GT-010 noise would otherwise ring a dozen ordinary light aircraft.
+RING_MIN_SEVERITY = "medium"
 
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -296,13 +300,6 @@ def _title(detection_id: str) -> str:
     return load_catalog()["by_id"].get(detection_id, {}).get("title", detection_id)
 
 
-def alert_label(source: str, injected: bool) -> str | None:
-    """The UI label. Uploaded data is unverified, and its ``injected`` claim is the uploader's."""
-    if source == "upload":
-        return UPLOAD_INJECTED_LABEL if injected else UPLOAD_LABEL
-    return INJECTED_LABEL if injected else None
-
-
 def alert_out(a: dict) -> dict:
     det = load_catalog()["by_id"].get(a["detection_id"], {})
     return {
@@ -323,6 +320,21 @@ def _point_out(p: dict, source: str = "recorded") -> dict:
             "label": alert_label(source, inj)}
 
 
+def _aircraft_label(track: list[dict], findings: list[dict]) -> str | None:
+    """Origin label of an aircraft page, from the sources and flags of its points and findings.
+
+    Injected recorded/live data is "Injected test data". Data that came only from an upload is
+    labelled as the upload is ("Uploaded recording (unverified)", or "Injected test data (as
+    declared by upload)" when the file claims it), never as plain or verified data."""
+    items = [(p.get("snapshot_source", "recorded"), bool(p.get("injected"))) for p in track]
+    items += [(f["source"], bool(f["injected"])) for f in findings]
+    if any(inj for src, inj in items if src != "upload"):
+        return INJECTED_LABEL
+    if any(src == "upload" for src, _ in items):
+        return alert_label("upload", any(inj for _, inj in items))
+    return None
+
+
 def alert_detail(conn: sqlite3.Connection, a: dict) -> dict:
     out = alert_out(a)
     out["evidence"] = [{**e, "unit": exports._unit(e.get("field", ""))} for e in a["evidence"]]
@@ -330,13 +342,18 @@ def alert_detail(conn: sqlite3.Connection, a: dict) -> dict:
     return out
 
 
-def _aircraft_out(a: dict, flags: dict[str, list[int]]) -> dict:
+def rings_aircraft(alert: dict) -> bool:
+    """Whether a finding is serious enough to flag its aircraft (display rule; detectors are unchanged)."""
+    return SEVERITIES.index(alert["severity"]) >= SEVERITIES.index(RING_MIN_SEVERITY)
+
+
+def _aircraft_out(a: dict, flags: dict[str, list[int]], ringed: set[str] = frozenset()) -> dict:
     ids = flags.get(a["icao"], [])
     return {
         "icao": a["icao"], "callsign": a["callsign"], "lat": a["lat"], "lon": a["lon"],
         "alt": a["alt_baro_ft"], "on_ground": a["on_ground"], "gs": a["gs_kt"], "track": a["track_deg"],
         "category": a["category"], "source": a["source"], "injected": bool(a["injected"]),
-        "label": INJECTED_LABEL if a["injected"] else None, "flagged": bool(ids), "alert_ids": ids,
+        "label": INJECTED_LABEL if a["injected"] else None, "flagged": a["icao"] in ringed, "alert_ids": ids,
     }
 
 
@@ -415,12 +432,15 @@ def get_live(
         raise HTTPException(403, "Live mode is disabled on this server (set GHOSTTRACK_LIVE=true)")
     view = live.get_traffic(mode, region, connect=db.connect, feed=feed)
     flags: dict[str, list[int]] = {}
+    ringed: set[str] = set()
     try:
         conn = db.connect()
         try:
             for al in db.flagged_alerts(conn, view["ts"] - FLAG_WINDOW_S):
                 for member in db.alert_members(al):
                     flags.setdefault(member, []).append(al["id"])
+                    if rings_aircraft(al):
+                        ringed.add(member)
         finally:
             conn.close()
     except (sqlite3.Error, OSError):
@@ -430,9 +450,9 @@ def get_live(
     response.headers["Vary"] = "Cookie"  # a shared cache must not mix the guest and the admin
     return {
         "source": view["source"], "notice": view["notice"], "mode": view["mode"], "region": view["region"],
-        "ts": view["ts"], "aircraft": [_aircraft_out(a, flags) for a in view["aircraft"]],
+        "ts": view["ts"], "aircraft": [_aircraft_out(a, flags, ringed) for a in view["aircraft"]],
         "injected_aircraft": view["injected_aircraft"],
-        "flagged_aircraft": sum(1 for a in view["aircraft"] if a["icao"] in flags),
+        "flagged_aircraft": sum(1 for a in view["aircraft"] if a["icao"] in ringed),
         "attribution": exports.ATTRIBUTION,
     }
 
@@ -451,7 +471,7 @@ def get_aircraft(address: str, conn: Conn):
         raise HTTPException(404, "aircraft not found")
     last = track[-1] if track else {}
     reg = last.get("registration")
-    injected = any(p.get("injected") for p in track) or any(f["injected"] for f in findings)
+    label = _aircraft_label(track, findings)
     return {
         "icao": addr,
         "registration": {
@@ -461,9 +481,9 @@ def get_aircraft(address: str, conn: Conn):
             "n_number": icao.icao_to_nnumber(addr),
             "registration_states": list(icao.states_for_registration(reg) or ()),
         },
-        "injected": injected,
-        "label": INJECTED_LABEL if injected else None,
-        "track": [_point_out(p) for p in track],
+        "injected": any(p.get("injected") for p in track) or any(f["injected"] for f in findings),
+        "label": label,
+        "track": [_point_out(p, p.get("snapshot_source", "recorded")) for p in track],
         "findings": [alert_out(f) for f in findings],
     }
 
@@ -632,14 +652,25 @@ def summary_md(conn: Conn):
 
 
 @protected.post("/api/recordings")
-def upload_recording(_w: Annotated[str, Writer], conn: Conn,
-                     file: Annotated[UploadFile, File(description="Recording (.jsonl or .jsonl.gz)")]):
+async def upload_recording(_w: Annotated[str, Writer], conn: Conn, request: Request):
+    # The multipart body is parsed here, after the writer check: declaring ``file: UploadFile`` would
+    # make FastAPI spool and parse the form before the dependencies run, so a guest could make the
+    # instance parse up to 4 MB per request before being refused with 403.
+    try:
+        form = await request.form(max_files=1, max_fields=10)
+    except HTTPException:
+        raise
+    except Exception:  # malformed multipart, or a body that is not a form at all
+        raise HTTPException(422, "Send the recording as a multipart form field named file") from None
+    file = form.get("file")
+    if file is None or isinstance(file, str):
+        raise HTTPException(422, "Send the recording as a multipart form field named file")
     limit = config.max_upload_bytes()
-    data = file.file.read(limit + 1)
+    data = await run_in_threadpool(file.file.read, limit + 1)
     if len(data) > limit:
         raise HTTPException(413, f"File too large (max {limit // (1024 * 1024)} MB)")
     try:
-        return uploads.run_upload(conn, data, config.max_decompressed_bytes())
+        return await run_in_threadpool(uploads.run_upload, conn, data, config.max_decompressed_bytes())
     except uploads.UploadError as exc:
         raise HTTPException(exc.status, str(exc)) from None
 

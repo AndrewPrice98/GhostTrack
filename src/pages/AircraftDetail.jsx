@@ -56,7 +56,7 @@ export default function AircraftDetail() {
   const points = track || []
   const first = points[0]
   const last = points.at(-1)
-  const flagged = findings.some((f) => f.status !== 'dismissed')
+  const flagged = findings.some((f) => f.status !== 'dismissed' && (f.severity === 'medium' || f.severity === 'high'))
   const name = (reg.callsign || '').trim() || hex.toUpperCase()
   const mini = { track: points, evidence: [], icao: hex, callsign: reg.callsign, injected: data.injected }
   return (

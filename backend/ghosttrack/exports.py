@@ -25,8 +25,29 @@ LICENCE_REF = "opendatacommons.org/licenses/odbl/1-0/"
 ATTRIBUTION = "ADS-B data from adsb.lol, available under the Open Database License (ODbL) 1.0."
 DISCLAIMER = "Plausibility analysis of decoded ADS-B data; not a certified surveillance system."
 INJECTED_BANNER = "INJECTED TEST DATA \u2014 not real air traffic"
+INJECTED_LABEL = "Injected test data"
+UPLOAD_LABEL = "Uploaded recording (unverified)"
+UPLOAD_INJECTED_LABEL = "Injected test data (as declared by upload)"
+UPLOAD_BANNER = "UPLOADED RECORDING (UNVERIFIED) — provenance not known; not verified as real air traffic"
+UPLOAD_INJECTED_BANNER = "INJECTED TEST DATA (as declared by upload) — provenance not verified"
 SOURCE_LABELS = {"recorded": "recorded capture (demo replay)", "live": "live feed", "upload": "uploaded recording"}
 SUMMARY_WINDOW_S = 24 * 3600.0
+
+def alert_label(source: str | None, injected: bool) -> str | None:
+    """The origin label shown in the UI and in every export. Uploaded data is unverified, and its
+    ``injected`` claim is the uploader's, so it is worded as a declaration."""
+    if source == "upload":
+        return UPLOAD_INJECTED_LABEL if injected else UPLOAD_LABEL
+    return INJECTED_LABEL if injected else None
+
+
+def _banner(alert: dict) -> str | None:
+    """The banner text for an alert that is not plain recorded or live traffic, else None."""
+    injected = bool(alert.get("injected"))
+    if alert.get("source") == "upload":
+        return UPLOAD_INJECTED_BANNER if injected else UPLOAD_BANNER
+    return INJECTED_BANNER if injected else None
+
 
 def _unit(field: str) -> str:
     """Unit of an evidence field, from the catalog's explicit ``evidence_units`` map ("" if none)."""
@@ -83,6 +104,10 @@ def _benign(alert: dict, det: dict) -> list[str]:
 
 
 def _source_line(alert: dict) -> str:
+    if alert.get("source") == "upload":
+        # The app cannot know where an uploaded file came from, so it claims no adsb.lol origin.
+        return (f"{alert_label('upload', bool(alert.get('injected')))}; provenance not known. Source of this alert: "
+                "uploaded recording. The data is not verified as real air traffic or as coming from any particular feed.")
     label = SOURCE_LABELS.get(alert.get("source")) or alert.get("source") or "unknown"
     return f"{ATTRIBUTION} Licence: {LICENCE_REF}; see data/LICENSE-ODbL.md. Source of this alert: {label}."
 
@@ -98,7 +123,10 @@ def evidence_json(alert: dict, track_points: Iterable, *, now: float) -> bytes:
         "generated_utc": _utc(now),
         "ghosttrack_version": __version__,
         "injected_test_data": bool(alert.get("injected")),
-        "injected_notice": INJECTED_BANNER if alert.get("injected") else None,
+        "injected_notice": _banner(alert) if alert.get("injected") else None,
+        "origin_label": alert_label(alert.get("source"), bool(alert.get("injected"))),
+        "unverified_upload": alert.get("source") == "upload",
+        "origin_notice": UPLOAD_BANNER if alert.get("source") == "upload" and not alert.get("injected") else None,
         "alert": {
             "id": alert.get("id"),
             "detection_id": alert["detection_id"],
@@ -132,7 +160,7 @@ def evidence_filename(alert: dict, ext: str = "json") -> str:
     """Suggested download name; contains "injected" for injected test data."""
     icao = "".join(c for c in str(alert.get("icao") or "fleet") if c.isalnum())[:12] or "fleet"
     det = "".join(c for c in str(alert["detection_id"]) if c.isalnum() or c == "-")[:12]
-    inj = "-injected" if alert.get("injected") else ""
+    inj = "-injected" if alert.get("injected") else ("-upload" if alert.get("source") == "upload" else "")
     return f"ghosttrack-evidence-{det}-{icao}{inj}.{ext}"
 
 
@@ -207,8 +235,9 @@ def evidence_html(alert: dict, track_points: Iterable, *, now: float) -> bytes:
     injected = bool(alert.get("injected"))
     parts = [f"<h1>{_e(alert['detection_id'])} &mdash; {_e(title)}</h1>"]
     parts.append('<div class="small">GhostTrack evidence pack</div>')
-    if injected:
-        parts.append(f'<div class="banner" role="alert">{_e(INJECTED_BANNER)}</div>')
+    banner = _banner(alert)
+    if banner:
+        parts.append(f'<div class="banner" role="alert">{_e(banner)}</div>')
     sev = _e(alert["severity"])
     conf = alert.get("confidence")
     meta = [
@@ -255,7 +284,8 @@ def evidence_html(alert: dict, track_points: Iterable, *, now: float) -> bytes:
     parts.append(
         f'<p class="small">Generated {_e(_utc(now))} by GhostTrack {_e(__version__)}.<br>{_e(DISCLAIMER)}</p>'
     )
-    return _page(("[INJECTED] " if injected else "") + f"GhostTrack evidence {alert['detection_id']} {alert.get('icao') or ''}", "\n".join(parts))
+    prefix = "[INJECTED] " if injected else ("[UPLOADED, UNVERIFIED] " if alert.get("source") == "upload" else "")
+    return _page(prefix + f"GhostTrack evidence {alert['detection_id']} {alert.get('icao') or ''}", "\n".join(parts))
 
 
 # ------------------------------------------------------------------ summary report
@@ -273,12 +303,13 @@ def _summary_data(alerts: Sequence[dict], validation: Sequence[Any], gaps: Seque
     rows = [(d["id"], d["title"], by_det.get(d["id"], 0)) for d in cat["detections"]]
     known = {d["id"] for d in cat["detections"]}
     rows += [(i, "(not in catalog)", n) for i, n in sorted(by_det.items()) if i not in known]
-    inj = sum(1 for a in recent if a.get("injected"))
+    up = sum(1 for a in recent if a.get("source") == "upload")
+    inj = sum(1 for a in recent if a.get("injected") and a.get("source") != "upload")
     v = cat["validation"]
     budget = float(v["fp_budget_per_hour"])
     return {
         "generated": _utc(now), "version": __version__, "window": "last 24 hours",
-        "total": len(recent), "injected": inj, "real": len(recent) - inj, "by_detection": rows,
+        "total": len(recent), "injected": inj, "uploaded": up, "real": len(recent) - inj - up, "by_detection": rows,
         "scenarios": [(r.scenario, ",".join(r.expected) or "-", ",".join(r.fired) or "-",
                        _Trusted("PASS" if r.passed else "FAIL"),
                        "-" if r.time_to_detect_s is None else f"{r.time_to_detect_s:.0f} s") for r in validation],
@@ -299,7 +330,9 @@ def summary_report_html(alerts: Sequence[dict], validation: Sequence[Any] = (), 
          f'<div class="small">Generated {_e(s["generated"])}, GhostTrack {_e(s["version"])}</div>']
     p.append(f"<h2>Alerts, {_e(s['window'])}</h2>")
     p.append(f"<p>{s['total']} alerts: {s['real']} from real/recorded traffic, {s['injected']} from "
-             "<strong>injected test data</strong> (not real air traffic).</p>")
+             "<strong>injected test data</strong> (not real air traffic), "
+             f"{s['uploaded']} from <strong>uploaded recordings (unverified)</strong> "
+             "(never counted as real traffic, whatever the upload declares).</p>")
     p.append(_table(["Detection", "Title", "Alerts"], s["by_detection"]))
     p.append("<h2>Validation: injected scenarios</h2>")
     p.append(_table(["Scenario", "Expected", "Fired", "Result", "Time to detect"], s["scenarios"])
@@ -345,7 +378,9 @@ def summary_report_md(alerts: Sequence[dict], validation: Sequence[Any] = (), fp
     out = ["# GhostTrack summary report", "", f"Generated {s['generated']}, GhostTrack {s['version']}", "",
            f"## Alerts, {s['window']}", "",
            f"{s['total']} alerts: {s['real']} from real/recorded traffic, {s['injected']} from "
-           "**injected test data** (not real air traffic).", ""]
+           "**injected test data** (not real air traffic), "
+           f"{s['uploaded']} from **uploaded recordings (unverified)** "
+           "(never counted as real traffic, whatever the upload declares).", ""]
     out += _md_table(["Detection", "Title", "Alerts"], s["by_detection"])
     out += ["", "## Validation: injected scenarios", ""]
     out += (_md_table(["Scenario", "Expected", "Fired", "Result", "Time to detect"], s["scenarios"])

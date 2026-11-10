@@ -35,7 +35,7 @@ export function sourceOf(value) {
   return SOURCES[value] ? value : 'other'
 }
 
-/** ADS-B emitter categories (DECISIONS.md section 4). */
+/** ADS-B emitter categories (DECISIONS.md, "ADS-B emitter categories"). */
 export const CATEGORIES = {
   A0: 'No category information', A1: 'Light', A2: 'Small', A3: 'Large', A4: 'High vortex (B757)',
   A5: 'Heavy', A6: 'High performance', A7: 'Rotorcraft',

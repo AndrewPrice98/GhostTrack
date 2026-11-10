@@ -19,7 +19,7 @@ from ghosttrack.detections import analyse
 from ghosttrack.geo import haversine_nm
 from ghosttrack.scenarios import GAP_SCENARIOS, SCENARIOS, scenario_by_id
 
-INJECTED_LABEL = "Injected test data"
+INJECTED_LABEL = exports.INJECTED_LABEL
 FIXTURE_VERSION = 1
 REPLAY_MAX_FRAMES = 400
 REPLAY_NEARBY_NM = 40.0

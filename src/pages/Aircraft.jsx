@@ -97,7 +97,7 @@ export default function Aircraft() {
                         <td data-label="Status" className="status-cell">
                           {a.flagged && <Chip tone="flagged" glyph="◎">Flagged</Chip>}
                           {a.injected && <> <InjectedTag short /></>}
-                          {!a.flagged && !a.injected && <span className="muted small">No alerts</span>}
+                          {!a.flagged && !a.injected && <span className="muted small">{a.alert_ids?.length ? 'Low severity only' : 'No alerts'}</span>}
                         </td>
                       </tr>
                     )

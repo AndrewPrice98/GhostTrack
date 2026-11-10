@@ -199,3 +199,57 @@ def test_hostile_severity_icao_detection_id():
     title = out.split("<title>")[1].split("</title>")[0]
     assert "<" not in title and '"' not in title
     assert "<script" not in exports.summary_report_html([make_alert(detection_id=h)], now=NOW).decode().lower()
+
+
+# ------------------------------------------------------------------ uploaded data keeps its provenance
+
+
+def test_upload_evidence_is_labelled_unverified_and_claims_no_adsb_lol_source():
+    alert = make_alert(source="upload", injected=False)
+    doc = json.loads(exports.evidence_json(alert, pts(), now=NOW))
+    assert doc["origin_label"] == "Uploaded recording (unverified)" and doc["unverified_upload"] is True
+    assert doc["origin_notice"] and doc["injected_test_data"] is False
+    assert "adsb.lol" not in doc["data_source"] and "ODbL" not in doc["data_source"]
+    assert "provenance not known" in doc["data_source"]
+    html = exports.evidence_html(alert, pts(), now=NOW).decode()
+    assert "UPLOADED RECORDING (UNVERIFIED)" in html and "adsb.lol" not in html
+    assert "INJECTED TEST DATA" not in html and "[UPLOADED, UNVERIFIED]" in html
+
+
+def test_declared_injected_upload_says_as_declared_by_upload():
+    alert = make_alert(source="upload", injected=True)
+    doc = json.loads(exports.evidence_json(alert, pts(), now=NOW))
+    assert doc["origin_label"] == "Injected test data (as declared by upload)"
+    assert doc["injected_notice"] == exports.UPLOAD_INJECTED_BANNER and "as declared by upload" in doc["injected_notice"]
+    html = exports.evidence_html(alert, pts(), now=NOW).decode()
+    assert "INJECTED TEST DATA (as declared by upload)" in html and "adsb.lol" not in html
+    assert exports.INJECTED_BANNER not in html  # the unqualified "not real air traffic" claim is not made for an upload
+
+
+def test_recorded_alerts_are_unchanged_by_the_upload_rules():
+    doc = json.loads(exports.evidence_json(make_alert(injected=True), pts(), now=NOW))
+    assert doc["origin_label"] == "Injected test data" and doc["unverified_upload"] is False
+    assert doc["injected_notice"] == exports.INJECTED_BANNER and "adsb.lol" in doc["data_source"]
+    assert json.loads(exports.evidence_json(make_alert(), pts(), now=NOW))["origin_label"] is None
+
+
+def test_summary_separates_uploads_and_never_counts_them_as_real():
+    alerts = [
+        make_alert(id=1),                                    # recorded, real
+        make_alert(id=2, injected=True),                     # recorded, injected
+        make_alert(id=3, source="upload"),                   # an upload claiming nothing
+        make_alert(id=4, source="upload", injected=True),    # an upload declaring injected data
+        make_alert(id=5, source="upload"),
+    ]
+    md = exports.summary_report_md(alerts, now=NOW)
+    assert "5 alerts: 1 from real/recorded traffic, 1 from **injected test data**" in md
+    assert "3 from **uploaded recordings (unverified)**" in md and "never counted as real traffic" in md
+    html = exports.summary_report_html(alerts, now=NOW).decode()
+    assert "5 alerts: 1 from real/recorded traffic, 1 from" in html and "3 from <strong>uploaded recordings (unverified)" in html
+    only_uploads = exports.summary_report_md([make_alert(source="upload")], now=NOW)
+    assert "1 alerts: 0 from real/recorded traffic" in only_uploads
+
+
+def test_evidence_filename_marks_uploads():
+    assert exports.evidence_filename(make_alert(source="upload")).endswith("-upload.json")
+    assert "-injected" in exports.evidence_filename(make_alert(source="upload", injected=True))

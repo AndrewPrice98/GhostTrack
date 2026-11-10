@@ -1,4 +1,4 @@
-"""Fix round 2: no future state at detection time, connection-failure fallback, untrusted upstream time."""
+"""Replay alerts hold no future state, connection-failure fallback, untrusted upstream time, live notices."""
 from __future__ import annotations
 
 import re
@@ -21,7 +21,7 @@ def recorded_alerts(conn, det, base=HOUR):
     return [a for a in db.list_alerts(conn) if a["detection_id"] == det and a["first_ts"] >= base]
 
 
-# ------------------------------------------------------------------ 1: detection-time content
+# ------------------------------------------------------------------ detection-time content
 
 
 def test_detection_time_alert_describes_only_what_has_been_observed(conn):
@@ -79,7 +79,7 @@ def test_fixture_initial_state_differs_where_the_episode_grows():
     assert len(t[("GT-007", "adfbb1")]["initial"]["evidence"]) < len(t[("GT-007", "adfbb1")]["evidence"])
 
 
-# ------------------------------------------------------------------ 2: connection failures
+# ------------------------------------------------------------------ connection failures
 
 
 @pytest.mark.parametrize("exc", [OSError("read-only file system"), sqlite3.OperationalError("unable to open database file")])
@@ -127,7 +127,7 @@ def test_a_connection_that_fails_midway_also_falls_back():
     assert view["notice"] == live.STORAGE_NOTICE and view["aircraft"]
 
 
-# ------------------------------------------------------------------ 3: untrusted upstream time
+# ------------------------------------------------------------------ untrusted upstream time
 
 
 @pytest.mark.parametrize("skew", [1e9, 4000.0, -4000.0, -1e9])
@@ -163,7 +163,7 @@ def test_a_small_clock_difference_keeps_the_upstream_time(db_file):
     assert feed.current("socal").snapshot.ts == clock.t - 4.0
 
 
-# ------------------------------------------------------------------ minors: notices
+# ------------------------------------------------------------------ notices
 
 
 def test_stale_live_data_says_how_old_it_is(conn, feed_env):  # noqa: F811
