@@ -1,6 +1,6 @@
 """ICAO 24-bit address facts: State allocation blocks and the US N-number mapping.
 
-N-number mapping (our own derivation, see DECISIONS.md section 3). No public description of the
+N-number mapping (our own derivation, see DECISIONS.md, "US N-number to ICAO address mapping"). No public description of the
 algorithm was found; this implementation was derived from the structure of US registrations and
 validated against published registration/address pairs (tests/test_icao.py).
 

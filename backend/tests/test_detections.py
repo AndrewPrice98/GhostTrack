@@ -1,5 +1,5 @@
 """Each detection fires on its crafted scenario and stays silent on matching benign data,
-plus the Review Focus tests (missing fields, MLAT tolerance, ground traffic, segment gaps)."""
+plus the cross-cutting tests (missing fields, MLAT tolerance, ground traffic, segment gaps)."""
 import copy
 import dataclasses
 import gzip
@@ -436,7 +436,7 @@ def test_gt010_silent_on_steady_integrity_and_not_evaluated_without_it():
     assert e.status == "not_evaluated" and e.not_evaluated["missing_integrity"] > 0
 
 
-# ------------------------------------------------------------------ Review Focus
+# ------------------------------------------------------------------ cross-cutting behaviour
 
 
 def test_missing_fields_not_evaluated():
@@ -532,7 +532,7 @@ def test_recordings_are_evaluated(path):
     an = analyse(snaps)
     for det_id, s in an.summary.items():
         assert s.samples > 0, det_id
-    # Raw alert counts feed the false-positive budget (Task 4/5); see DECISIONS.md "Task 3".
+    # Raw alert counts feed the false-positive budget (see DECISIONS.md, Validation and budget).
     # Medium and high findings are the ones the budget counts. Low (GT-010) and info findings are
     # excluded: the daytime recordings show alternating NIC/NACp 0 reports (see DECISIONS.md), which
     # are shown but not budgeted.
@@ -586,3 +586,12 @@ def test_gt007_band_at_altitude():
     # FL350: tolerance 1,500 + 0.08 x 35,000 + 350 = 4,650 ft.
     assert not fired(run(flight(alt=35000.0, alt_geom_ft=39500.0)), "GT-007")
     assert fired(run(flight(alt=35000.0, alt_geom_ft=39800.0)), "GT-007")
+
+
+def test_catalog_text_lists_hold_plain_strings():
+    """A stray ``: `` in a YAML list item turns it into a mapping, which the Detections page cannot render."""
+    from ghosttrack.catalog import load_catalog
+
+    for d in load_catalog()["detections"]:
+        for key in ("references", "benign_causes"):
+            assert all(isinstance(x, str) for x in d.get(key, [])), (d["id"], key)

@@ -10,7 +10,7 @@ README_PAIRS = [
     ("N1", "a00001"), ("N1A", "a00002"), ("N10", "a0025a"), ("N1000", "a0070c"), ("N2", "a18d50"),
     ("N9", "ac6a79"), ("N99999", "adf7c7"), ("N12345", "a061d9"), ("N86QU", "abcdef"),
 ]
-# Source B: registration/address pairs from the adsb.lol sample of 2026-11-10 (DECISIONS.md section 3).
+# Source B: registration/address pairs from the adsb.lol sample of 2026-11-10 (DECISIONS.md, "US N-number to ICAO address mapping").
 RECORDED_PAIRS = [
     ("N738TJ", "a9ea75"), ("N383HA", "a4671f"), ("N8806Q", "ac210e"), ("N523DE", "a69463"),
     ("N8738K", "ac04f5"), ("N8779Q", "ac13f9"), ("N652FR", "a894b5"), ("N664FR", "a8c3a2"),

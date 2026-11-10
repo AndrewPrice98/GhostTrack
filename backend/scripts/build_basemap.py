@@ -3,7 +3,7 @@
     python scripts/build_basemap.py --coastline ne_10m_coastline.shp --land ne_10m_land.shp         --borders ne_10m_admin_0_boundary_lines_land.shp
 
 Reads Natural Earth 1:10m coastline, land and country-boundary shapefiles (public domain, see
-DECISIONS.md section 5), clips them to the Southern California demo region, projects them and
+DECISIONS.md, "Base map"), clips them to the Southern California demo region, projects them and
 simplifies them (Douglas-Peucker), and writes ``src/assets/basemap-socal.json`` for the SVG map.
 The shapefiles themselves are not committed; download them to a scratch directory.
 

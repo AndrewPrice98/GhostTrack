@@ -106,9 +106,9 @@ socal-e.jsonl.gz       0.33     326        0      0.00  GT-010/low=83
 
 How to read it:
 
-- **Time to detect** is measured at snapshot granularity (about 5-6 s in the recordings, 10 s live); 0 means detected on the first injected report.
+- **Time to detect** is measured at snapshot granularity: about 5-6 s in the recording the scenarios are injected into (`socal-a`), about 10 s in the daytime recordings and in live mode. 0 means detected on the first injected report.
 - **`gradual_drift` is a known gap.** A real track dragged 0.1 NM per poll stays inside every kinematic limit, so single-receiver plausibility checks cannot see it. If a future change makes it fire, validation reports `GAP CLOSED` and fails until the scenario is promoted.
-- **False-positive budget.** Only findings of severity medium or high count. The budget is the larger of 1.0 per hour and 1.5 times the measured rate. Across all five recordings the counted rate is 0 per hour, so it still sits at the 1.0/h floor. The daytime recordings do produce low-severity GT-010 findings (listed in the table, not budgeted; see DECISIONS.md).
+- **False-positive budget.** Only findings of severity medium or high count. The budget is the larger of 1.0 per hour and 1.5 times the measured rate. Across all five recordings the counted rate is 0 per hour, so it still sits at the 1.0/h floor. The daytime recordings do produce low-severity GT-010 findings (listed in the table, not budgeted; see [Limitations](#honest-limitations)).
 
 **The baseline is still thin.** The measurement comes from five 20-minute recordings, about 1.7 hours in total: three overnight (00:39-01:39 Pacific, light traffic, 48-60 aircraft each) and two taken on 2026-11-10 at 16:00-16:41 UTC (08:00-08:41 Pacific, 275 and 326 aircraft). Both daytime recordings are from the same morning, one region and a single day, so the 1.0/h budget is still the floor, not an earned figure. One counted finding in a 20-minute recording is 3 per hour.
 
@@ -116,20 +116,21 @@ How to read it:
 
 ## Data sources and licences
 
-- **Traffic:** [adsb.lol](https://adsb.lol) open data (`api.adsb.lol`), licensed under the [Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/1-0/). *Contains information from adsb.lol (https://adsb.lol), which is made available here under the Open Database License (ODbL) (https://opendatacommons.org/licenses/odbl/1-0/).* The notice is shown in the app footer, on the map and here. The committed recordings are a derived database and ship under the ODbL with `backend/data/LICENSE-ODbL.md`.
+- **Traffic:** [adsb.lol](https://adsb.lol) open data (`api.adsb.lol`), licensed under the [Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/1-0/). *Contains information from adsb.lol (https://adsb.lol), which is made available here under the Open Database License (ODbL) (https://opendatacommons.org/licenses/odbl/1-0/).* The notice is shown in the app footer, on the map and here. The committed recordings, and the fixture JSON files computed from them (`backend/data/*.json`), are a derived database and ship under the ODbL with `backend/data/LICENSE-ODbL.md`.
 - **Basemap:** Natural Earth outlines (public domain), clipped and simplified into `src/assets/basemap-socal.json`. No external map tiles are loaded.
 - **Reference facts:** the ICAO 24-bit address allocation (Annex 10 Vol. III, Table 9-1), nationality marks and ADS-B emitter categories are our own short tables with sources cited in `DECISIONS.md` and `THIRD_PARTY.md`.
 
-adsb.lol publishes no numeric rate limit. GhostTrack makes at most one upstream request per region per 10 seconds per instance, to one fixed host, with a descriptive User-Agent. See `DECISIONS.md` for the open question on whether a hosted demo counts as "production" use.
+adsb.lol publishes no numeric rate limit. GhostTrack makes at most one upstream request per region per 10 seconds per instance (the recorder enforces the same 10 s floor), to one fixed host, with a descriptive User-Agent. See `DECISIONS.md` for the open question on whether a hosted demo counts as "production" use.
 
 ## Quick start
 
-Requirements: Python 3.12+, Node 20.19+ (or 22.12+).
+Requirements: Python 3.12+ and Node `^20.19.0 || >=22.12.0` (the `engines` field in `package.json`).
 
 ```bash
 # Backend (from the repo root)
 python -m venv backend/.venv
-backend/.venv/bin/pip install -r backend/requirements-dev.txt   # Windows: backend\.venv\Scripts\pip
+source backend/.venv/bin/activate        # bash/zsh; PowerShell: backend\.venv\Scripts\Activate.ps1
+pip install -r backend/requirements-dev.txt
 cd backend
 python -m ghosttrack validate            # the table above
 python -m ghosttrack demo                # API on :8000: recorded replay, read-only guests
@@ -139,7 +140,9 @@ npm ci
 npm run dev                              # dashboard on :5173, proxies /api to :8000
 ```
 
-`python -m ghosttrack serve` runs the API for a self-hosted install (sign-in required, no guests, no upstream requests until you set `GHOSTTRACK_LIVE=true`). To create the admin login, run `python -m ghosttrack create-admin` and set the variables it prints. To re-record traffic: `python scripts/record.py --name socal-d --minutes 20`, then `python scripts/build_demo.py`.
+Every backend command in this README (`python -m ghosttrack ...`, `python scripts/...`, `python -m pytest`) assumes the virtual environment is active. Without activating it, run the same commands with the environment's interpreter instead: `.venv/bin/python` from `backend/` (Windows: `.venv\Scripts\python`).
+
+`python -m ghosttrack serve` runs the API for a self-hosted install (sign-in required, no guests, no upstream requests until you set `GHOSTTRACK_LIVE=true`). To create the admin login, run `python -m ghosttrack create-admin` and set the variables it prints. To re-record traffic under a new name: `python scripts/record.py --name socal-f --minutes 20`, then `python scripts/build_demo.py` (an existing name such as `socal-d` is refused unless you pass `--force`, which overwrites it; the recorder polls at most once per 10 s). The recorder and the live view contact adsb.lol; the tests, `validate` and the recorded replay do not.
 
 ### Configuration
 
@@ -199,7 +202,7 @@ flowchart LR
 
 ## Tests
 
-Last full run: **530 backend tests** (pytest, 0 skipped, about 2.5 minutes) and **41 frontend tests** (`node --test`, pure logic: geometry, formatting, charts, replay), all passing; the production build succeeds. The backend suite covers the detections and their catalog thresholds, the scenarios, the tracker, ingest, the API and auth, uploads, the demo replay, the exports, the Vercel entry point and this README's validation block.
+Last full run: **558 backend tests** (pytest, 0 skipped, about 3.5 minutes) and **41 frontend tests** (`node --test`, pure logic: geometry, formatting, charts, replay), all passing; the production build succeeds. The backend suite covers the detections and their catalog thresholds, the scenarios, the tracker, ingest, the API and auth, uploads, the demo replay, the exports, the Vercel entry point and this README's validation block.
 
 ```bash
 cd backend && python -m pytest -q -rs    # -rs names any skipped test
@@ -216,10 +219,11 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request: backend tes
 - **A consistent, slow attack is invisible.** `gradual_drift` (a track dragged inside every kinematic limit) is a documented gap, as above.
 - **Benign causes are real.** GNSS interference, receiver or decoder errors, address re-use, database errors in registrations and unconverged GNSS height all trigger the same checks. That is why every finding lists benign causes and why severity is not the same as certainty.
 - **Military exclusion is best effort.** The point endpoint did not deliver `dbFlags` in the live sample, so aircraft are dropped on the flag when present or on the US DoD address block `AE0000-AFFFFF`. Other military traffic may appear.
+- **GT-010 is noisy on busy daytime traffic.** The two daytime recordings produced 114 low-severity GT-010 findings (NIC/NACp flapping to 0 and back, mostly on category A1 light aircraft, 30 of them on TIS-B-sourced reports; about 86 % recover within 60 s) and nothing from any other detection. They are listed with their benign causes but are not budgeted, and the live map rings an aircraft only for medium-or-higher findings, so these low findings never show up as red-ringed "flagged" aircraft (they stay in the alert lists and the aircraft panel). The detector itself is unchanged. Candidate fixes, left as future work: require persistence (for example NIC 0 for more than one report) and skip TIS-B-sourced integrity values.
 - **Thin false-positive baseline.** Five recordings (about 1.7 hours): three overnight and two from one weekday morning. No other days, weekends or evening peaks.
 - **Scenarios are synthetic.** They show the checks working on the attacks they were written for; they are not evidence about attacks in the wild.
 
 ## Licence
 
 - **Code:** MIT, see [LICENSE](LICENSE).
-- **Recordings and derived data:** ODbL 1.0, see `backend/data/LICENSE-ODbL.md`. Other third-party data keeps its own licence, listed in [THIRD_PARTY.md](THIRD_PARTY.md).
+- **Recordings and the data derived from them (fixtures):** ODbL 1.0, see `backend/data/LICENSE-ODbL.md`. Other third-party data keeps its own licence, listed in [THIRD_PARTY.md](THIRD_PARTY.md).

@@ -7,7 +7,7 @@
 #
 # Units: kt (knots), ft, ft/min, NM, s, g (9.80665 m/s^2).
 #
-# False-positive budget (controller ruling for Tasks 4/5): the budget counts only findings of
+# False-positive budget: the budget counts only findings of
 # severity medium or high. "info" (GT-008) and "low" (GT-003, GT-010) findings are reported and
 # shown, but do not count toward it.
 version: 1
@@ -49,7 +49,7 @@ position_error_nm:
   other: 1.0
   max_nm: 2.0
 
-# Kinematic limits per ADS-B emitter category (DECISIONS.md section 4). Values are deliberately
+# Kinematic limits per ADS-B emitter category (DECISIONS.md, "ADS-B emitter categories"). Values are deliberately
 # generous ceilings, not typical performance: ground speed includes up to ~200 kt of jet-stream
 # tailwind; categories are self-declared and sometimes wrong (a light jet transmitting A1).
 #   max_gs_kt      ground speed ceiling
@@ -86,7 +86,7 @@ categories:
     max_accel_g: 1.0
     rationale: >-
       Airliners cruise at Mach 0.78-0.86 (450-500 KTAS); the highest reported ground speeds of
-      airliners in strong jet streams are around 700-720 kt. Transport category limit load is
+      airliners in strong jet streams are about 700-720 kt. Transport category limit load is
       2.5 g. Emergency descents are typically 4,000-8,000 fpm.
   A4:
     label: High vortex (B757)
@@ -223,7 +223,7 @@ detections:
       - Ground speed derived by MLAT/TIS-B rather than reported by the aircraft.
       - Exceptional jet-stream tailwind.
     references:
-      - DECISIONS.md section 4 (emitter categories)
+      - DECISIONS.md, "ADS-B emitter categories"
       - readsb README-json.md (gs in knots)
 
   - id: GT-002
@@ -304,7 +304,7 @@ detections:
       - A bad GNSS/INS position from the aircraft (often with a low NACp).
       - Two aircraft briefly using the same address (see GT-005).
     references:
-      - Review Focus 3 (haversine, 5-minute segments)
+      - Haversine great-circle distance between consecutive fresh positions (ghosttrack/geo.py); track segments split at common.segment_gap_s
 
   - id: GT-005
     title: Duplicate ICAO address
@@ -360,7 +360,7 @@ detections:
     references:
       - ICAO Annex 10 Vol III Part I, Appendix to Ch. 9, Table 9-1 (ghosttrack/facts/icao_table9_1.py)
       - ICAO Annex 7 (nationality marks; ghosttrack/facts/registration_prefixes.py)
-      - DECISIONS.md section 3 (N-number mapping, own derivation)
+      - DECISIONS.md, "US N-number to ICAO address mapping" (own derivation)
 
   - id: GT-007
     title: Barometric / geometric altitude divergence
@@ -395,7 +395,7 @@ detections:
       - Altitude reported in 100 ft steps by older transponders near the band edge.
     references:
       - readsb README-json.md (alt_geom is WGS84 height)
-      - ICAO Doc 8168 (PANS-OPS), altimeter temperature correction: about 4 % of height per 10 C below standard temperature (volume and chapter differ between editions, so none is cited)
+      - "ICAO Doc 8168 (PANS-OPS), altimeter temperature correction: about 4 % of height per 10 C below standard temperature (volume and chapter differ between editions, so none is cited)"
 
   - id: GT-008
     title: Emergency squawk without matching behaviour
