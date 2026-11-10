@@ -16,7 +16,7 @@ from ghosttrack.detections.kinematics import (
     gt004_teleport,
 )
 from ghosttrack.model import Snapshot
-from ghosttrack.tracker import Track, Tracker, build_tracks
+from ghosttrack.tracker import Track, Tracker, TrackerSettings, build_tracks
 
 TRACK_DETECTIONS: dict[str, Callable[[Track, Context], Evaluation]] = {
     "GT-001": gt001_ground_speed,
@@ -60,6 +60,7 @@ class Analysis:
 
 
 def analyse_tracker(tracker: Tracker, ctx: Context | None = None) -> Analysis:
+    """Run every detection over an existing tracker (built with the same catalog's settings)."""
     ctx = ctx or Context()
     if ctx.observation_start is None:
         ctx.observation_start = tracker.first_ts
@@ -80,4 +81,6 @@ def analyse_tracker(tracker: Tracker, ctx: Context | None = None) -> Analysis:
 
 
 def analyse(snapshots: Iterable[Snapshot], ctx: Context | None = None) -> Analysis:
-    return analyse_tracker(build_tracks(snapshots), ctx)
+    """Build tracks with the context catalog's timing rules, then run every detection."""
+    ctx = ctx or Context()
+    return analyse_tracker(build_tracks(snapshots, TrackerSettings.from_catalog(ctx.catalog)), ctx)

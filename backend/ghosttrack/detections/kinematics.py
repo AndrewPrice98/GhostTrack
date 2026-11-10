@@ -12,6 +12,7 @@ from ghosttrack.detections.base import (
     Evaluation,
     Evidence,
     airborne_skip_reason,
+    category_key,
     is_ground,
     group_violations,
     is_derived,
@@ -26,7 +27,9 @@ from ghosttrack.tracker import Track
 
 
 def _conf(ctx: Context, state, observed: float, threshold: float) -> float:
-    c = margin_confidence(observed, threshold)
+    common = ctx.catalog["common"]
+    c = margin_confidence(observed, threshold, float(common["margin_confidence_base"]),
+                          float(common["margin_confidence_cap"]))
     if is_derived(state, ctx.catalog):
         c = round(c * float(ctx.catalog["common"]["derived_source_confidence"]), 3)
     return c
@@ -36,7 +39,26 @@ def _emit(ev: Evaluation, det: dict, ctx: Context, icao: str, violations, min_sa
     window = float(ctx.catalog["common"]["merge_window_s"])
     for group in group_violations(violations, window):
         if len(group) >= min_samples:
-            ev.findings.append(make_finding(det, icao, group, text(group)))
+            ev.findings.append(make_finding(det, icao, group, text(group), catalog=ctx.catalog))
+
+
+def _category_used(point_category: str | None, track: Track, ctx: Context) -> str:
+    """The category whose limits were applied: the report's own, else the track's; shown as
+    'A0 (unknown limits)' when it has no limits of its own."""
+    raw = point_category or track.category
+    key = category_key(raw, ctx.catalog)
+    if raw is None:
+        return "none declared (unknown limits)"
+    return raw if key == raw else f"{raw} (unknown limits)"
+
+
+def _categories(group) -> str:
+    return " / ".join(dict.fromkeys(g[3] for g in group))
+
+
+def _ceilings(group, unit: str) -> str:
+    vals = sorted({round(g[1].threshold) for g in group})
+    return " / ".join(f"{v} {unit}" for v in vals) + (" ceiling" if len(vals) == 1 else " ceilings")
 
 
 # --------------------------------------------------------------------------- GT-001
@@ -62,11 +84,11 @@ def gt001_ground_speed(track: Track, ctx: Context) -> Evaluation:
             ev.samples += 1
             thr = lim * source_factor(st, ctx.catalog)
             if st.gs_kt > thr:
-                viol.append((p.ts, Evidence("gs_kt", st.gs_kt, thr, p.ts), _conf(ctx, st, st.gs_kt, thr), p))
-        cat = track.category or "unknown"
+                viol.append((p.ts, Evidence("gs_kt", st.gs_kt, thr, p.ts), _conf(ctx, st, st.gs_kt, thr),
+                             _category_used(st.category, track, ctx)))
         _emit(ev, det, ctx, track.icao, viol, min_samples, lambda g: (
             f"Ground speed up to {max(x[1].observed for x in g):.0f} kt in {len(g)} reports, above the "
-            f"{g[0][1].threshold:.0f} kt ceiling for emitter category {cat}."
+            f"{_ceilings(g, 'kt')} for emitter category {_categories(g)}."
         ))
     return ev
 
@@ -96,7 +118,8 @@ def gt002_vertical_rate(track: Track, ctx: Context) -> Evaluation:
             ev.samples += 1
             thr = lim * source_factor(st, ctx.catalog)
             if abs(rate) > thr:
-                viol.append((p.ts, Evidence("vertical_rate_fpm", rate, thr, p.ts), _conf(ctx, st, abs(rate), thr), p))
+                viol.append((p.ts, Evidence("vertical_rate_fpm", rate, thr, p.ts), _conf(ctx, st, abs(rate), thr),
+                             _category_used(st.category, track, ctx)))
         # Rate implied by consecutive barometric altitudes at their position times. A violation
         # a->b only counts when the neighbouring pairs (point before a -> b, and a -> point after
         # b) also violate: a single corrupt altitude (a spike that returns) is then rejected
@@ -106,6 +129,8 @@ def gt002_vertical_rate(track: Track, ctx: Context) -> Evaluation:
             if p.state.alt_baro_ft is None:
                 ev.not_evaluated["missing_alt_baro"] += 1
         pts = [p for p in pts if p.state.alt_baro_ft is not None]
+        if len(pts) == 1:
+            ev.not_evaluated["insufficient_points"] += 1
 
         def implied(a, b):
             dt = b.t - a.t
@@ -133,11 +158,10 @@ def gt002_vertical_rate(track: Track, ctx: Context) -> Evaluation:
             confirm = [c for c in confirm if c is not None]
             if confirm and all(c[0] > c[1] for c in confirm):
                 viol.append((b.ts, Evidence("implied_vertical_rate_fpm", round(rate), thr, b.ts),
-                             _conf(ctx, b.state, rate, thr), b))
-        cat = track.category or "unknown"
+                             _conf(ctx, b.state, rate, thr), _category_used(b.state.category, track, ctx)))
         _emit(ev, det, ctx, track.icao, viol, min_samples, lambda g: (
             f"Vertical rate up to {max(abs(x[1].observed) for x in g):.0f} ft/min in {len(g)} checks, "
-            f"above the {g[0][1].threshold:.0f} ft/min ceiling for emitter category {cat}."
+            f"above the {_ceilings(g, 'ft/min')} for emitter category {_categories(g)}."
         ))
     return ev
 
@@ -162,6 +186,8 @@ def gt003_turn_accel(track: Track, ctx: Context) -> Evaluation:
             else:
                 pts.append(p)
         ground_times = [p.ts for p in seg.points if is_ground(p, track)]
+        if len(pts) == 1:
+            ev.not_evaluated["insufficient_points"] += 1
         for pa, pb in zip(pts, pts[1:]):
             a, b = pa.state, pb.state
             dt = pb.ts - pa.ts
@@ -237,6 +263,8 @@ def gt004_teleport(track: Track, ctx: Context) -> Evaluation:
             elif is_ground(p, track):
                 ev.not_evaluated["on_ground" if p.state.on_ground else "ground_vehicle"] += 1
         pts = [p for p in seg.position_points() if not is_ground(p, track)]
+        if len(pts) == 1:
+            ev.not_evaluated["insufficient_points"] += 1
         viol = []
         for pa, pb in zip(pts, pts[1:]):
             lim = limits(pb.state.category or track.category, ctx.catalog)["max_gs_kt"]
@@ -257,5 +285,5 @@ def gt004_teleport(track: Track, ctx: Context) -> Evaluation:
                 f"{biggest[1].threshold} kt) within one track segment"
                 + (f"; {len(group)} jumps in this episode." if len(group) > 1 else ".")
             )
-            ev.findings.append(make_finding(det, track.icao, group, text))
+            ev.findings.append(make_finding(det, track.icao, group, text, catalog=ctx.catalog))
     return ev

@@ -3,13 +3,16 @@
 Timing. A snapshot is stamped with the upstream ``now``; each aircraft's position was last
 updated ``seen_pos`` seconds earlier. With 5 s polling, using the snapshot time as the position
 time would turn a repeated or late position into a fake jump, so every point carries its true
-position time ``t_pos = snapshot ts - seen_pos``. Positions older than 60 s are "stale" and never
-feed kinematic checks; a position without ``seen_pos`` has an unknown age and is treated the same
-way for position-based checks.
+position time ``t_pos = snapshot ts - seen_pos``. Positions older than ``stale_position_s``
+(catalog, 60 s) are "stale" and never feed kinematic checks; a position without ``seen_pos`` has
+an unknown age and is treated the same way for position-based checks.
 
-Segments. A gap longer than 5 minutes (``GAP_S``) between consecutive appearances, or between
-consecutive position times, starts a new segment. Detections never compare points across
-segments, so a long gap is never treated as a teleport.
+Segments. A gap longer than ``segment_gap_s`` (catalog, 5 minutes) between consecutive
+appearances, or between consecutive position times, starts a new segment. Detections never
+compare points across segments, so a long gap is never treated as a teleport.
+
+All three timing values come from the ``common`` section of ``detections/catalog.yml``
+(``TrackerSettings.from_catalog``); a different catalog can be injected.
 
 Repeats. adsb.lol returns the last known position until a new one arrives, so the same position
 appears in several snapshots. A point whose position time and coordinates equal the previous
@@ -22,11 +25,24 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from ghosttrack.catalog import load_catalog
 from ghosttrack.model import Snapshot, State
 
-GAP_S = 300.0
-STALE_POS_S = 60.0
-_SAME_TIME_S = 0.25
+
+@dataclass(frozen=True)
+class TrackerSettings:
+    segment_gap_s: float
+    stale_position_s: float
+    repeat_position_time_s: float
+
+    @classmethod
+    def from_catalog(cls, catalog: dict | None = None) -> "TrackerSettings":
+        common = (catalog or load_catalog())["common"]
+        return cls(
+            segment_gap_s=float(common["segment_gap_s"]),
+            stale_position_s=float(common["stale_position_s"]),
+            repeat_position_time_s=float(common["repeat_position_time_s"]),
+        )
 
 
 def is_ground_category(category: str | None) -> bool:
@@ -38,6 +54,7 @@ def is_ground_category(category: str | None) -> bool:
 class TrackPoint:
     ts: float  # snapshot time (epoch s)
     state: State
+    stale_after_s: float  # catalog common.stale_position_s, injected by the Tracker
     repeat_pos: bool = False
 
     @property
@@ -54,7 +71,7 @@ class TrackPoint:
     @property
     def stale(self) -> bool:
         sp = self.state.seen_pos_s
-        return sp is not None and sp > STALE_POS_S
+        return sp is not None and sp > self.stale_after_s
 
     @property
     def position_usable(self) -> bool:
@@ -121,7 +138,8 @@ class Track:
 class Tracker:
     """Incremental track builder. Feed snapshots in time order with ``update``."""
 
-    def __init__(self) -> None:
+    def __init__(self, settings: TrackerSettings | None = None) -> None:
+        self.settings = settings or TrackerSettings.from_catalog()
         self.tracks: dict[str, Track] = {}
         self.first_ts: float | None = None
         self.last_ts: float | None = None
@@ -137,29 +155,30 @@ class Tracker:
         track = self.tracks.get(st.icao)
         if track is None:
             track = self.tracks[st.icao] = Track(st.icao)
-        point = TrackPoint(ts, st)
+        cfg = self.settings
+        point = TrackPoint(ts, st, stale_after_s=cfg.stale_position_s)
         if not track.segments:
             track.segments.append(Segment([point]))
             return
         seg = track.segments[-1]
         prev = seg.points[-1]
-        if ts - prev.ts > GAP_S or point.t - prev.t > GAP_S:
+        if ts - prev.ts > cfg.segment_gap_s or point.t - prev.t > cfg.segment_gap_s:
             track.segments.append(Segment([point]))
             return
         tp, ptp = point.t_pos, prev.t_pos
         if (
             tp is not None
             and ptp is not None
-            and abs(tp - ptp) < _SAME_TIME_S
+            and abs(tp - ptp) < cfg.repeat_position_time_s
             and st.lat == prev.state.lat
             and st.lon == prev.state.lon
         ):
-            point = TrackPoint(ts, st, repeat_pos=True)
+            point = TrackPoint(ts, st, repeat_pos=True, stale_after_s=cfg.stale_position_s)
         seg.points.append(point)
 
 
-def build_tracks(snapshots: Iterable[Snapshot]) -> Tracker:
-    tr = Tracker()
+def build_tracks(snapshots: Iterable[Snapshot], settings: TrackerSettings | None = None) -> Tracker:
+    tr = Tracker(settings)
     for snap in sorted(snapshots, key=lambda s: s.ts):
         tr.update(snap)
     return tr

@@ -67,6 +67,77 @@ def test_thresholds_come_from_catalog():
     assert fired(run(fl, ctx=Context(catalog=cat)), "GT-001")
 
 
+def edited(path: str, value):
+    """A deep copy of the catalog with one value changed; path like 'common.segment_gap_s' or
+    'GT-009.appearance_window_s' (a detection threshold)."""
+    cat = copy.deepcopy(load_catalog())
+    head, key = path.split(".")
+    target = cat["common"] if head == "common" else cat["by_id"][head]["thresholds"]
+    assert key in target, path
+    target[key] = value
+    return Context(catalog=cat)
+
+
+def test_tracker_timing_comes_from_catalog():
+    # segment_gap_s: a 200 s gap is one segment by default (and the 100 NM jump fires GT-004) ...
+    first = flight(n=10)
+    lat, lon = destination(first[-1][1].lat, first[-1][1].lon, 0.0, 100.0)
+    second = flight(n=10, t0=first[-1][0] + 200.0, lat=lat, lon=lon)
+    assert fired(run(first, second), "GT-004")
+    an = run(first, second, ctx=edited("common.segment_gap_s", 150))  # ... two segments with 150 s
+    assert len(an.tracker.tracks["a061d9"].segments) == 2 and not fired(an, "GT-004")
+    # stale_position_s: 75 s old positions are stale by default, usable with a 90 s limit.
+    fl = shift(flight(seen_pos_s=75.0), 10, 20.0)
+    assert ev(run(fl), "GT-004").status == "not_evaluated"
+    assert fired(run(fl, ctx=edited("common.stale_position_s", 90)), "GT-004")
+    # repeat_position_time_s: same coordinates 0.4 s apart in position time.
+    a = st(seen_pos_s=0.5)
+    b = dataclasses.replace(a, seen_pos_s=5.1)
+    pts = analyse([Snapshot(T0, [a]), Snapshot(T0 + 5, [b])]).tracker.tracks["a061d9"].points
+    assert [p.repeat_pos for p in pts] == [False, False]
+    pts = analyse([Snapshot(T0, [a]), Snapshot(T0 + 5, [b])],
+                  edited("common.repeat_position_time_s", 0.5)).tracker.tracks["a061d9"].points
+    assert [p.repeat_pos for p in pts] == [False, True]
+
+
+def test_detection_settings_come_from_catalog():
+    # GT-009 appearance window: the ghosts report no track for their first 40 s.
+    def no_track_at_first(i, f):
+        if i < 9:
+            f["track_deg"] = None
+    ghosts = []
+    for k in range(8):
+        lat, lon = destination(34.0, -118.0, 90.0, 0.8 * k)
+        ghosts.append(flight(icao=f"c1{k:04x}", t0=T0 + 300 + 3 * k, n=20, lat=lat, lon=lon, gs=420.0,
+                             track=270.0, registration=None, per_point=no_track_at_first))
+    an = run(*_background(), *ghosts)
+    assert not fired(an, "GT-009") and ev(an, "GT-009", None).not_evaluated["missing_velocity"] == 8
+    assert fired(run(*_background(), *ghosts, ctx=edited("GT-009.appearance_window_s", 60)), "GT-009")
+    # A confidence: GT-006 state mismatch.
+    fl = flight(icao="3c70c2", registration="G-ABCD", n=3)
+    assert fired(run(fl), "GT-006")[0].confidence == 0.5
+    assert fired(run(fl, ctx=edited("GT-006.confidence_state", 0.35)), "GT-006")[0].confidence == 0.35
+    # GT-005 alternations required per episode.
+    spike = _single_spike(flight(n=20))
+    assert not fired(run(spike), "GT-005")
+    assert fired(run(spike, ctx=edited("GT-005.min_alternations", 1)), "GT-005")
+    # Shared confidence curve for threshold detections.
+    base = fired(run(flight(gs=1200.0)), "GT-001")[0].confidence
+    lower = fired(run(flight(gs=1200.0), ctx=edited("common.margin_confidence_cap", 0.7)), "GT-001")[0].confidence
+    assert lower < base and lower <= 0.7
+
+
+def _single_spike(fl, at=10, nm=12.0):
+    """One report displaced far off the track (a bad CPR decode or MLAT solution)."""
+    out = []
+    for i, (ts, s) in enumerate(fl):
+        if i == at:
+            lat, lon = destination(s.lat, s.lon, 0.0, nm)
+            s = dataclasses.replace(s, lat=lat, lon=lon)
+        out.append((ts, s))
+    return out
+
+
 def test_finding_shape():
     an = run(flight(gs=1200.0))
     f = fired(an, "GT-001")[0]
@@ -182,6 +253,20 @@ def test_gt005_fires_on_same_snapshot_duplicate():
     assert fired(an, "GT-005")
 
 
+@pytest.mark.parametrize("source,nac_p", [("adsb", 9), ("mlat", None)])
+def test_single_spike_is_gt004_only(source, nac_p):
+    an = run(_single_spike(flight(n=20, source=source, nac_p=nac_p)))
+    assert fired(an, "GT-004")
+    assert not fired(an, "GT-005")
+
+
+def test_gt005_mlat_confidence_is_scaled():
+    adsb = fired(run(flight(n=20), flight(n=20, lat=34.9, lon=-117.0, t0=T0 + 2.5)), "GT-005")
+    mlat = fired(run(flight(n=20, source="mlat", nac_p=None),
+                     flight(n=20, lat=34.9, lon=-117.0, t0=T0 + 2.5, source="mlat", nac_p=None)), "GT-005")
+    assert adsb and mlat and mlat[0].confidence < adsb[0].confidence
+
+
 def test_gt005_silent_on_single_aircraft_and_on_one_way_offset():
     assert not fired(run(flight()), "GT-005")
     an = run(shift(flight(), 10, 20.0))
@@ -204,6 +289,11 @@ def test_gt006_allocation(icao_hex, reg, flag):
     an = run(flight(icao=icao_hex, registration=reg, n=3))
     assert bool(fired(an, "GT-006")) is flag
     assert ev(an, "GT-006", icao_hex).status == ("flagged" if flag else "clean")
+
+
+def test_gt006_compares_hex_case_insensitively():
+    assert not fired(run(flight(icao="A061D9", registration="N12345", n=3)), "GT-006")
+    assert fired(run(flight(icao="A061DA", registration="N12345", n=3)), "GT-006")
 
 
 @pytest.mark.parametrize("icao_hex,reg,reason", [
@@ -255,6 +345,18 @@ def test_gt008_silent_when_behaviour_matches():
     assert not fired(run(flight(squawk="1200", n=40)), "GT-008")
 
 
+def test_gt008_surface_vehicle_needs_two_reports():
+    def once(i, f):
+        f["squawk"] = "7700" if i == 4 else None
+    e = ev(run(flight(category="C2", alt=0.0, gs=10.0, per_point=once, n=10)), "GT-008")
+    assert not e.findings and e.not_evaluated["insufficient_points"] == 1
+
+    def twice(i, f):
+        f["squawk"] = "7700" if i in (4, 5) else None
+    f = fired(run(flight(category="C2", alt=0.0, gs=10.0, per_point=twice, n=10)), "GT-008")
+    assert len(f) == 1 and f[0].severity == "info" and "surface vehicle" in f[0].explanation
+
+
 def test_gt008_short_code_not_evaluated():
     def blip(i, f):
         f["squawk"] = "7600" if 3 <= i <= 5 else "1200"
@@ -279,6 +381,31 @@ def test_gt009_fires_on_ghost_flood():
     f = fired(an, "GT-009")
     assert len(f) == 1 and f[0].icao is None
     assert f[0].evidence[0].observed == 8 and len(f[0].evidence[1].observed) == 8
+
+
+def test_gt009_needs_every_pair_similar():
+    # Speeds 386-414 kt: each is within 15 kt of 400, but the ends differ by 28 kt. An
+    # anchor-only check would see 5 similar arrivals; pairwise, the largest group is 3.
+    arrivals = []
+    for k, gs in enumerate([386.0, 388.0, 400.0, 412.0, 414.0]):
+        lat, lon = destination(34.0, -118.0, 90.0, 0.8 * k)
+        arrivals.append(flight(icao=f"c4{k:04x}", t0=T0 + 300 + 3 * k, n=20, lat=lat, lon=lon, gs=gs,
+                               track=270.0, registration=None))
+    an = run(*_background(), *arrivals)
+    assert not fired(an, "GT-009") and ev(an, "GT-009", None).samples == 5
+
+
+def test_gt009_reports_each_address_once():
+    # A long formation whose candidate clusters overlap: every address in at most one finding.
+    ghosts = []
+    for k in range(12):
+        lat, lon = destination(34.0, -118.0, 90.0, 0.5 * k)
+        ghosts.append(flight(icao=f"c5{k:04x}", t0=T0 + 300 + 8 * k, n=30, lat=lat, lon=lon, gs=420.0,
+                             track=270.0, registration=None))
+    found = fired(run(*_background(), *ghosts), "GT-009")
+    members = [a for f in found for a in f.evidence[1].observed]
+    assert found and len(members) == len(set(members))
+    assert all(f.evidence[2].observed <= 60 for f in found)  # every pair within window_s
 
 
 def test_gt009_silent_on_dispersed_arrivals_and_at_startup():
@@ -423,3 +550,36 @@ def test_points_without_category_inherit_the_track_category():
         assert ev(an, det).status == "not_evaluated", det
     # ... and a helicopter keeps rotorcraft limits (350 kt is impossible for A7, not for "unknown").
     assert fired(run(flight(category="A7", gs=350.0, per_point=drop_cat)), "GT-001")
+
+
+def test_insufficient_points_not_evaluated():
+    an = analyse([Snapshot(T0, [st()])])
+    for det in ("GT-004", "GT-005", "GT-010"):
+        e = ev(an, det)
+        assert e.status == "not_evaluated" and e.not_evaluated["insufficient_points"] == 1, det
+
+
+def test_explanations_name_the_category_actually_used():
+    # Track mostly A3, but the speeding reports declare A7: the A7 ceiling applied and is named.
+    def heli(i, f):
+        if i >= 15:
+            f["category"] = "A7"
+    f = fired(run(flight(gs=350.0, n=20, per_point=heli)), "GT-001")
+    assert len(f) == 1 and "category A7" in f[0].explanation and "300 kt" in f[0].explanation
+
+    # Reports without a category use the track's (A7) and say so.
+    def nocat(i, f):
+        f["category"] = None if i >= 10 else "A7"
+    f = fired(run(flight(gs=350.0, n=20, per_point=nocat)), "GT-001")
+    assert "category A7" in f[0].explanation
+    # A0 has no limits of its own.
+    f = fired(run(flight(gs=1200.0, category="A0")), "GT-001")
+    assert "A0 (unknown limits)" in f[0].explanation
+    f = fired(run(flight(alt=30000.0, vrate=-40000.0, category="A1")), "GT-002")
+    assert "category A1" in f[0].explanation
+
+
+def test_gt007_band_at_altitude():
+    # FL350: tolerance 1,500 + 0.08 x 35,000 + 350 = 4,650 ft.
+    assert not fired(run(flight(alt=35000.0, alt_geom_ft=39500.0)), "GT-007")
+    assert fired(run(flight(alt=35000.0, alt_geom_ft=39800.0)), "GT-007")

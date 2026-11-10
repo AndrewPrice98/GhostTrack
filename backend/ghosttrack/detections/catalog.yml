@@ -6,6 +6,10 @@
 # it never reports "clean" for something it could not check.
 #
 # Units: kt (knots), ft, ft/min, NM, s, g (9.80665 m/s^2).
+#
+# False-positive budget (controller ruling for Tasks 4/5): the budget counts only findings of
+# severity medium or high. "info" (GT-008) and "low" (GT-003, GT-010) findings are reported and
+# shown, but do not count toward it.
 version: 1
 
 # Shared timing rules (see ghosttrack/tracker.py): positions older than stale_position_s are
@@ -13,6 +17,15 @@ version: 1
 common:
   stale_position_s: 60
   segment_gap_s: 300
+  # Two consecutive reports of the same coordinates whose position times differ by less than
+  # this are the same position repeated by the aggregator (skipped by position checks).
+  repeat_position_time_s: 0.25
+  # Default confidence for threshold detections: margin_confidence_base at the threshold, rising
+  # linearly to margin_confidence_cap at twice the threshold.
+  margin_confidence_base: 0.5
+  margin_confidence_cap: 0.95
+  # Evidence entries kept per finding (the first ones plus the strongest).
+  max_evidence: 6
   # Merge violations of the same detection that are closer than this into one finding.
   merge_window_s: 60
   # MLAT and TIS-B positions/velocities are derived by ground systems (multilateration, radar
@@ -270,16 +283,23 @@ detections:
     scope: track
     rationale: >-
       The same 24-bit address reported at two places at (nearly) the same time, faster than
-      Mach 3 apart: either two reports in one snapshot, or a track that jumps out and back
-      (A -> B -> A) with both jumps faster than Mach 3 while A -> A is plausible.
+      Mach 3 apart: either two reports in one snapshot, or a track that repeatedly jumps out and
+      back (A -> B -> A) with both jumps faster than Mach 3 while A -> A is plausible.
     inputs: [lat, lon, seen_pos_s, nac_p, source]
     thresholds:
       mach3_kt: 1984
       min_separation_nm: 5.0
       min_dt_s: 1.0
+      min_alternations: 2
+      confidence_simultaneous: 0.9
+      confidence_alternating: 0.8
     false_positive_notes: >-
       Upstream aggregators merge reports per address, so a real duplicate shows up as an
-      interleaved, alternating track. A single jump that stays offset is GT-004, not GT-005.
+      interleaved, alternating track. One out-and-back (a single bad CPR decode or MLAT solution)
+      is GT-004 only: an episode needs min_alternations out-and-back patterns. Two reports in the
+      same snapshot count on their own, since one bad decode cannot produce two reports. A single
+      jump that stays offset is GT-004, not GT-005. MLAT/TIS-B confidence is scaled by
+      derived_source_confidence.
     benign_causes:
       - Two aircraft with the same address through a transponder configuration error (addresses are set by hand at installation).
       - A test bench or ground transponder using a real address.
@@ -296,6 +316,8 @@ detections:
     inputs: [icao, registration]
     thresholds:
       rule: flag only if both States are known and disagree, or a valid N-number converts to a different address
+      confidence_nnumber: 0.6
+      confidence_state: 0.5
     false_positive_notes: >-
       Conservative: unknown prefixes, addresses outside every Table 9-1 block (for example
       Taiwan) and ICAO temporary blocks are "not evaluated". Note that adsb.lol's registration
@@ -323,16 +345,21 @@ detections:
     inputs: [alt_baro_ft, alt_geom_ft, on_ground, seen_pos_s]
     thresholds:
       pressure_band_ft: 1500
-      temperature_fraction: 0.12
+      temperature_fraction: 0.08
       geoid_ft: 350
       tolerance: pressure_band_ft + temperature_fraction x |alt_baro| + geoid_ft
       min_samples: 3
       min_duration_s: 15
+      confidence_base: 0.4
+      confidence_cap: 0.85
     false_positive_notes: >-
-      Pressure band: QNH 958-1068 hPa at about 27 ft/hPa. Temperature: altimeter error is about
-      4 % of height per 10 C of ISA deviation; 0.12 covers +-30 C. Geoid: EGM96 undulation is
-      within about -106 m to +85 m (350 ft). Needs 3 samples over 15 s: GNSS height is briefly
-      wrong while a receiver acquires (seen in the recordings with NIC 1).
+      Pressure band: QNH 958-1068 hPa at about 27 ft/hPa. The QNH term is a near-surface
+      (sea-level pressure) figure; aloft the pressure/geometric offset is dominated by the
+      temperature term, so applying the full band at all altitudes is generous. Temperature:
+      altimeter error is about 4 % of height per 10 C of ISA deviation; 0.08 covers a +-20 C mean
+      deviation of the air column, which spans normal seasonal and latitude extremes. Geoid:
+      EGM96 undulation is within about -106 m to +85 m (350 ft). Needs 3 samples over 15 s: GNSS
+      height is briefly wrong while a receiver acquires (seen in the recordings with NIC 1).
     benign_causes:
       - Extreme pressure systems (tropical cyclones) or extreme temperatures.
       - GNSS receiver acquiring or degraded (low NIC), or a faulty altitude source.
@@ -358,10 +385,15 @@ detections:
       steady_alt_ft: 1000
       steady_track_deg: 30
       steady_gs_kt: 50
+      min_behaviour_samples: 3
+      min_surface_reports: 2
       confidence: 0.2
     false_positive_notes: >-
       Codes seen for less than 2 minutes are not evaluated (transient codes while a pilot dials a
-      new squawk). Never raised above "info".
+      new squawk); fewer than min_behaviour_samples airborne reports with altitude, speed and
+      track are not evaluated. A surface vehicle needs min_surface_reports reports with the code.
+      Always severity info with confidence 0.2: it is informational and does not count toward
+      the false-positive budget, which counts only medium and high findings.
     benign_causes:
       - Medical or minor technical emergency with no change of flight profile yet.
       - Radio failure (7600) flown exactly as cleared, as the rules require.
@@ -377,7 +409,9 @@ detections:
       Spoofing tools can inject many fabricated aircraft at once. Real aircraft seldom appear
       together in a small area with the same velocity. Flags when at least min_new new airborne
       addresses appear within window_s and radius_nm of each other with ground speeds within
-      gs_spread_kt and tracks within track_spread_deg.
+      gs_spread_kt and tracks within track_spread_deg. Every pair of members must meet all four
+      limits (not just each member against one anchor), so a chain of slightly different
+      aircraft cannot add up to a cluster.
     inputs: [lat, lon, gs_kt, track_deg, first appearance time]
     thresholds:
       min_new: 5
@@ -386,13 +420,22 @@ detections:
       gs_spread_kt: 15
       track_spread_deg: 10
       warmup_s: 60
+      appearance_window_s: 30
+      confidence_base: 0.5
+      confidence_step: 0.05
+      confidence_cap: 0.95
     false_positive_notes: >-
-      Addresses already present in the first warmup_s of an observation are not "new". Ground
-      traffic and appearances without speed or track are not evaluated. Formation flights and
-      airshows can match; five or more is rare outside them.
+      Addresses already present in the first warmup_s of an observation are not "new". A new
+      address's velocity is its first airborne report with speed and track within
+      appearance_window_s of first sight; otherwise it is not evaluated, as is ground traffic.
+      Clusters are built greedily (pairwise compatible members) and an address is reported in at
+      most one cluster. Confidence is confidence_base at min_new members plus confidence_step
+      per extra member, up to confidence_cap. Formation flights and airshows can match; five or
+      more is rare outside them.
     benign_causes:
       - Formation flight or airshow.
       - Several aircraft entering receiver coverage together (rare at the same speed and track).
+      - A receiver or feeder reconnecting to the aggregator, so many aircraft reappear at once (they rarely share a velocity).
     references:
       - Costin and Francillon, "Ghost in the Air(Traffic)", Black Hat USA 2012
       - Schafer et al., "Experimental Analysis of Attacks on Next Generation Air Traffic Communication", ACNS 2013

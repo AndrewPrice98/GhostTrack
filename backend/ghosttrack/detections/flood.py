@@ -8,11 +8,6 @@ from ghosttrack.detections.base import Context, Evaluation, Evidence, Finding, a
 from ghosttrack.geo import angle_diff_deg, haversine_nm
 from ghosttrack.tracker import Track
 
-# A new address's first airborne report with speed and track must come this soon after it first
-# appears, otherwise its "appearance" velocity is unknown.
-_APPEARANCE_WINDOW_S = 30.0
-
-
 @dataclass(frozen=True)
 class Appearance:
     icao: str
@@ -23,12 +18,13 @@ class Appearance:
     track_deg: float
 
 
-def _appearance(track: Track) -> Appearance | str:
-    """The address's first airborne report with speed and track, or a not-evaluated reason."""
+def _appearance(track: Track, window_s: float) -> Appearance | str:
+    """The address's first airborne report with speed and track within window_s of first sight,
+    or a not-evaluated reason."""
     first = track.ts_first
     reason = "no_airborne_velocity"
     for p in track.points:
-        if p.ts - first > _APPEARANCE_WINDOW_S:
+        if p.ts - first > window_s:
             break
         r = airborne_skip_reason(p, track)
         if r:
@@ -55,7 +51,7 @@ def gt009_ghost_flood(tracks: Mapping[str, Track], ctx: Context) -> Evaluation:
         if t.ts_first < start + warmup:
             ev.not_evaluated["present_at_start"] += 1
             continue
-        a = _appearance(t)
+        a = _appearance(t, float(th["appearance_window_s"]))
         if isinstance(a, str):
             ev.not_evaluated[a] += 1
         else:
@@ -65,23 +61,35 @@ def gt009_ghost_flood(tracks: Mapping[str, Track], ctx: Context) -> Evaluation:
     window, radius = float(th["window_s"]), float(th["radius_nm"])
     gs_spread, trk_spread, min_new = float(th["gs_spread_kt"]), float(th["track_spread_deg"]), int(th["min_new"])
 
-    clusters: list[set[str]] = []
+    def compatible(a: Appearance, b: Appearance) -> bool:
+        return (
+            abs(a.ts - b.ts) <= window
+            and haversine_nm(a.lat, a.lon, b.lat, b.lon) <= radius
+            and abs(a.gs_kt - b.gs_kt) <= gs_spread
+            and abs(angle_diff_deg(a.track_deg, b.track_deg)) <= trk_spread
+        )
+
+    # Greedy clique per anchor: add the anchor's neighbours (closest in time first) only when
+    # compatible with every member already in, so every pair meets all four limits.
+    candidates: list[list[Appearance]] = []
     for anchor in apps:
-        members = [
-            a for a in apps
-            if abs(a.ts - anchor.ts) <= window
-            and haversine_nm(anchor.lat, anchor.lon, a.lat, a.lon) <= radius
-            and abs(a.gs_kt - anchor.gs_kt) <= gs_spread
-            and abs(angle_diff_deg(anchor.track_deg, a.track_deg)) <= trk_spread
-        ]
+        neighbours = sorted((a for a in apps if a is not anchor and compatible(anchor, a)),
+                            key=lambda a: (abs(a.ts - anchor.ts), a.icao))
+        members = [anchor]
+        for a in neighbours:
+            if all(compatible(a, m) for m in members):
+                members.append(a)
         if len(members) >= min_new:
-            ids = {m.icao for m in members}
-            for c in clusters:
-                if c & ids:
-                    c |= ids
-                    break
-            else:
-                clusters.append(ids)
+            candidates.append(members)
+    # Largest clusters first; an address is reported in at most one cluster.
+    clusters: list[set[str]] = []
+    used: set[str] = set()
+    for members in sorted(candidates, key=lambda m: (-len(m), min(a.ts for a in m))):
+        ids = {a.icao for a in members}
+        if ids & used:
+            continue
+        used |= ids
+        clusters.append(ids)
 
     by_icao = {a.icao: a for a in apps}
     for ids in clusters:
@@ -89,7 +97,8 @@ def gt009_ghost_flood(tracks: Mapping[str, Track], ctx: Context) -> Evaluation:
         t0, t1 = members[0].ts, members[-1].ts
         gs = [m.gs_kt for m in members]
         n = len(members)
-        conf = round(min(0.95, 0.5 + 0.05 * (n - min_new)), 3)
+        conf = round(min(float(th["confidence_cap"]),
+                         float(th["confidence_base"]) + float(th["confidence_step"]) * (n - min_new)), 3)
         ev.findings.append(Finding(
             detection_id="GT-009",
             icao=None,

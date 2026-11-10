@@ -29,6 +29,7 @@ def gt007_altitude_divergence(track: Track, ctx: Context) -> Evaluation:
     th = det["thresholds"]
     ev = Evaluation("GT-007", track.icao)
     min_samples, min_dur = int(th["min_samples"]), float(th["min_duration_s"])
+    conf_base, conf_cap = float(th["confidence_base"]), float(th["confidence_cap"])
     window = float(ctx.catalog["common"]["merge_window_s"])
     for seg in track.segments:
         viol = []
@@ -47,7 +48,7 @@ def gt007_altitude_divergence(track: Track, ctx: Context) -> Evaluation:
             tol = altitude_tolerance_ft(st.alt_baro_ft, th)
             if abs(diff) > tol:
                 viol.append((p.ts, Evidence("alt_geom_minus_baro_ft", diff, round(tol), p.ts),
-                             margin_confidence(abs(diff), tol, base=0.4, cap=0.85), p))
+                             margin_confidence(abs(diff), tol, conf_base, conf_cap), p))
         for group in group_violations(viol, window):
             if len(group) < min_samples or group[-1][0] - group[0][0] < min_dur:
                 continue
@@ -57,7 +58,7 @@ def gt007_altitude_divergence(track: Track, ctx: Context) -> Evaluation:
                 f"over {group[-1][0] - group[0][0]:.0f} s ({len(group)} reports), beyond the "
                 f"{worst[1].threshold} ft band allowed for pressure, temperature and geoid effects."
             )
-            ev.findings.append(make_finding(det, track.icao, group, text))
+            ev.findings.append(make_finding(det, track.icao, group, text, catalog=ctx.catalog))
     return ev
 
 
@@ -83,10 +84,16 @@ def gt008_emergency_squawk(track: Track, ctx: Context) -> Evaluation:
             t0, t1 = group[0][0], group[-1][0]
             ground_vehicle = [p for p in pts if is_ground(p, track) and not p.state.on_ground]
             if ground_vehicle:
+                if len(ground_vehicle) < int(th["min_surface_reports"]):
+                    ev.not_evaluated["insufficient_points"] += 1
+                    continue
                 ev.samples += 1
+                cat = ground_vehicle[0].state.category or track.category
                 e = Evidence("squawk", code, "not expected from a surface vehicle", t0)
-                text = f"Squawk {code} transmitted by a surface vehicle (category {ground_vehicle[0].state.category})."
-                ev.findings.append(make_finding(det, track.icao, [(t0, e, conf, None), (t1, e, conf, None)], text))
+                text = (f"Squawk {code} transmitted by a surface vehicle (category {cat}) in "
+                        f"{len(ground_vehicle)} reports. Informational only.")
+                group = [(t0, e, conf, None), (t1, e, conf, None)]
+                ev.findings.append(make_finding(det, track.icao, group, text, catalog=ctx.catalog))
                 continue
             if t1 - t0 < float(th["min_duration_s"]):
                 ev.not_evaluated["emergency_code_too_short"] += 1
@@ -95,7 +102,8 @@ def gt008_emergency_squawk(track: Track, ctx: Context) -> Evaluation:
             alts = [p.state.alt_baro_ft for p in air if p.state.alt_baro_ft is not None]
             gss = [p.state.gs_kt for p in air if p.state.gs_kt is not None]
             trks = [p.state.track_deg for p in air if p.state.track_deg is not None]
-            if len(alts) < 3 or len(gss) < 3 or len(trks) < 3:
+            need = int(th["min_behaviour_samples"])
+            if len(alts) < need or len(gss) < need or len(trks) < need:
                 ev.not_evaluated["insufficient_behaviour_data"] += 1
                 continue
             ev.samples += 1
@@ -119,7 +127,7 @@ def gt008_emergency_squawk(track: Track, ctx: Context) -> Evaluation:
                     f"{alt_range:.0f} ft, track within {trk_dev:.0f} deg, speed within {gs_range:.0f} kt). "
                     "Informational only: many genuine emergencies look like this."
                 )
-                ev.findings.append(make_finding(det, track.icao, evid, text))
+                ev.findings.append(make_finding(det, track.icao, evid, text, catalog=ctx.catalog))
     if not any_emergency:
         # Nothing to check: no emergency code was transmitted. Counted as evaluated-clean,
         # since the input (squawk) was examined; a track without any squawk is not evaluated.
@@ -151,6 +159,8 @@ def gt010_integrity_drop(track: Track, ctx: Context) -> Evaluation:
             else:
                 pts.append(p)
         viol = []
+        if len(pts) == 1:
+            ev.not_evaluated["insufficient_points"] += 1
         for pa, pb in zip(pts, pts[1:]):
             ev.samples += 1
             dropped = [
@@ -175,5 +185,5 @@ def gt010_integrity_drop(track: Track, ctx: Context) -> Evaluation:
                 "track stayed smooth. Supporting indicator only (GNSS interference or a navigation "
                 "source change can cause this)."
             )
-            ev.findings.append(make_finding(det, track.icao, group, text))
+            ev.findings.append(make_finding(det, track.icao, group, text, catalog=ctx.catalog))
     return ev

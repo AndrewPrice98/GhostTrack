@@ -4,25 +4,13 @@ from __future__ import annotations
 import math
 from collections import Counter
 from dataclasses import asdict, dataclass, field
-from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
-import yaml
-
+from ghosttrack.catalog import load_catalog  # noqa: F401  (re-exported for ghosttrack.detections)
 from ghosttrack.model import State
 from ghosttrack.tracker import TrackPoint, is_ground_category
 
-CATALOG_PATH = Path(__file__).with_name("catalog.yml")
 SEVERITIES = ("info", "low", "medium", "high")
-
-
-@lru_cache(maxsize=1)
-def load_catalog() -> dict:
-    with CATALOG_PATH.open(encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
-    data["by_id"] = {d["id"]: d for d in data["detections"]}
-    return data
 
 
 @dataclass(frozen=True)
@@ -112,7 +100,7 @@ def position_error_nm(state: State, catalog: dict) -> float:
     return min(float(v), float(pe["max_nm"]))
 
 
-def margin_confidence(observed: float, threshold: float, base: float = 0.5, cap: float = 0.95) -> float:
+def margin_confidence(observed: float, threshold: float, base: float, cap: float) -> float:
     """base at the threshold, rising linearly to cap at twice the threshold."""
     if threshold <= 0 or not math.isfinite(observed):
         return cap
@@ -157,9 +145,11 @@ def make_finding(
     icao: str | None,
     group: list[tuple[float, Evidence, float, Any]],
     explanation: str,
+    *,
+    catalog: dict,
     severity: str | None = None,
-    max_evidence: int = 6,
 ) -> Finding:
+    max_evidence = int(catalog["common"]["max_evidence"])
     ev = [g[1] for g in group]
     if len(ev) > max_evidence:  # keep the first few and the strongest
         ev = ev[: max_evidence - 1] + [max(group, key=lambda g: g[2])[1]]
