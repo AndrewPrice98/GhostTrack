@@ -1,0 +1,487 @@
+{
+ "alerts": [
+  {
+   "benign_causes": [
+    "Wrong emitter category in the transponder configuration (for example a jet set to A1).",
+    "Ground speed derived by MLAT/TIS-B rather than reported by the aircraft.",
+    "Exceptional jet-stream tailwind."
+   ],
+   "callsign": "GHO1",
+   "confidence": 0.809,
+   "detection_id": "GT-001",
+   "evidence": [
+    {
+     "field": "gs_kt",
+     "observed": 1350.0,
+     "threshold": 800.0,
+     "ts": 300.0
+    },
+    {
+     "field": "gs_kt",
+     "observed": 1350.0,
+     "threshold": 800.0,
+     "ts": 315.0
+    },
+    {
+     "field": "gs_kt",
+     "observed": 1350.0,
+     "threshold": 800.0,
+     "ts": 319.999
+    },
+    {
+     "field": "gs_kt",
+     "observed": 1350.0,
+     "threshold": 800.0,
+     "ts": 325.0
+    },
+    {
+     "field": "gs_kt",
+     "observed": 1350.0,
+     "threshold": 800.0,
+     "ts": 330.0
+    },
+    {
+     "field": "gs_kt",
+     "observed": 1350.0,
+     "threshold": 800.0,
+     "ts": 300.0
+    }
+   ],
+   "explanation": "Ground speed up to 1350 kt in 24 reports, above the 800 kt ceiling for emitter category A3.",
+   "first_ts": 300.0,
+   "icao": "adf81e",
+   "injected": true,
+   "last_ts": 444.999,
+   "severity": "medium",
+   "source": "recorded"
+  },
+  {
+   "benign_causes": [
+    "MLAT solution jumping between geometries (mitigated by the 1 NM MLAT allowance).",
+    "A bad GNSS/INS position from the aircraft (often with a low NACp).",
+    "Two aircraft briefly using the same address (see GT-005)."
+   ],
+   "callsign": "GHO1",
+   "confidence": 0.796,
+   "detection_id": "GT-004",
+   "evidence": [
+    {
+     "field": "implied_speed_kt",
+     "observed": 1592,
+     "threshold": 960,
+     "ts": 319.999
+    },
+    {
+     "field": "implied_speed_kt",
+     "observed": 1592,
+     "threshold": 960,
+     "ts": 325.0
+    },
+    {
+     "field": "implied_speed_kt",
+     "observed": 1592,
+     "threshold": 960,
+     "ts": 330.0
+    },
+    {
+     "field": "implied_speed_kt",
+     "observed": 1592,
+     "threshold": 960,
+     "ts": 335.0
+    },
+    {
+     "field": "implied_speed_kt",
+     "observed": 1592,
+     "threshold": 960,
+     "ts": 340.0
+    },
+    {
+     "field": "implied_speed_kt",
+     "observed": 1592,
+     "threshold": 960,
+     "ts": 319.999
+    }
+   ],
+   "explanation": "Position jumped 2.3 NM in 5.0 s (1592 kt implied, ceiling 960 kt) within one track segment; 20 jumps in this episode.",
+   "first_ts": 319.999,
+   "icao": "adf81e",
+   "injected": true,
+   "last_ts": 444.999,
+   "severity": "high",
+   "source": "recorded"
+  },
+  {
+   "benign_causes": [
+    "Formation flight or airshow.",
+    "Several aircraft entering receiver coverage together (rare at the same speed and track).",
+    "A receiver or feeder reconnecting to the aggregator, so many aircraft reappear at once (they rarely share a velocity)."
+   ],
+   "callsign": null,
+   "confidence": 0.95,
+   "detection_id": "GT-009",
+   "evidence": [
+    {
+     "field": "new_addresses",
+     "observed": 30,
+     "threshold": 5,
+     "ts": 735.0
+    },
+    {
+     "field": "addresses",
+     "observed": [
+      "adf900",
+      "adf901",
+      "adf902",
+      "adf903",
+      "adf904",
+      "adf905",
+      "adf906",
+      "adf907",
+      "adf908",
+      "adf909",
+      "adf90a",
+      "adf90b",
+      "adf90c",
+      "adf90d",
+      "adf90e",
+      "adf90f",
+      "adf910",
+      "adf911",
+      "adf912",
+      "adf913",
+      "adf914",
+      "adf915",
+      "adf916",
+      "adf917",
+      "adf918",
+      "adf919",
+      "adf91a",
+      "adf91b",
+      "adf91c",
+      "adf91d"
+     ],
+     "threshold": null,
+     "ts": 735.0
+    },
+    {
+     "field": "appearance_span_s",
+     "observed": 0.0,
+     "threshold": 60.0,
+     "ts": 735.0
+    },
+    {
+     "field": "gs_range_kt",
+     "observed": 5.7,
+     "threshold": 15.0,
+     "ts": 735.0
+    }
+   ],
+   "explanation": "30 new addresses appeared within 0 s and 10 NM of each other with near-identical speed (about 420 kt) and track: a pattern typical of injected ghost aircraft.",
+   "first_ts": 735.0,
+   "icao": null,
+   "injected": true,
+   "last_ts": 735.0,
+   "severity": "high",
+   "source": "recorded"
+  },
+  {
+   "benign_causes": [
+    "MLAT solution jumping between geometries (mitigated by the 1 NM MLAT allowance).",
+    "A bad GNSS/INS position from the aircraft (often with a low NACp).",
+    "Two aircraft briefly using the same address (see GT-005)."
+   ],
+   "callsign": "TAI561",
+   "confidence": 0.95,
+   "detection_id": "GT-004",
+   "evidence": [
+    {
+     "field": "implied_speed_kt",
+     "observed": 32193,
+     "threshold": 960,
+     "ts": 1159.999
+    },
+    {
+     "field": "implied_speed_kt",
+     "observed": 32639,
+     "threshold": 960,
+     "ts": 1165.0
+    },
+    {
+     "field": "implied_speed_kt",
+     "observed": 33008,
+     "threshold": 960,
+     "ts": 1170.0
+    },
+    {
+     "field": "implied_speed_kt",
+     "observed": 32683,
+     "threshold": 960,
+     "ts": 1175.0
+    },
+    {
+     "field": "implied_speed_kt",
+     "observed": 30911,
+     "threshold": 960,
+     "ts": 1180.0
+    },
+    {
+     "field": "implied_speed_kt",
+     "observed": 32193,
+     "threshold": 960,
+     "ts": 1159.999
+    }
+   ],
+   "explanation": "Position jumped 45.3 NM in 5.6 s (29220 kt implied, ceiling 960 kt) within one track segment; 10 jumps in this episode.",
+   "first_ts": 1159.999,
+   "icao": "ac7e1c",
+   "injected": true,
+   "last_ts": 1215.5,
+   "severity": "high",
+   "source": "recorded"
+  },
+  {
+   "benign_causes": [
+    "Two aircraft with the same address through a transponder configuration error (addresses are set by hand at installation).",
+    "A test bench or ground transponder using a real address."
+   ],
+   "callsign": "TAI561",
+   "confidence": 0.8,
+   "detection_id": "GT-005",
+   "evidence": [
+    {
+     "field": "alternating_jump_kt",
+     "observed": 32193,
+     "threshold": 1984.0,
+     "ts": 1159.999
+    },
+    {
+     "field": "alternating_jump_kt",
+     "observed": 32639,
+     "threshold": 1984.0,
+     "ts": 1165.0
+    },
+    {
+     "field": "alternating_jump_kt",
+     "observed": 32683,
+     "threshold": 1984.0,
+     "ts": 1170.0
+    },
+    {
+     "field": "alternating_jump_kt",
+     "observed": 30911,
+     "threshold": 1984.0,
+     "ts": 1175.0
+    },
+    {
+     "field": "alternating_jump_kt",
+     "observed": 30911,
+     "threshold": 1984.0,
+     "ts": 1180.0
+    },
+    {
+     "field": "alternating_jump_kt",
+     "observed": 32193,
+     "threshold": 1984.0,
+     "ts": 1159.999
+    }
+   ],
+   "explanation": "Address ac7e1c was reported at two positions up to 45.3 NM apart at effectively the same time (9 out-and-back jump(s) faster than Mach 3): two transmitters appear to share this address.",
+   "first_ts": 1159.999,
+   "icao": "ac7e1c",
+   "injected": true,
+   "last_ts": 1200.499,
+   "severity": "high",
+   "source": "recorded"
+  },
+  {
+   "benign_causes": [
+    "MLAT solution jumping between geometries (mitigated by the 1 NM MLAT allowance).",
+    "A bad GNSS/INS position from the aircraft (often with a low NACp).",
+    "Two aircraft briefly using the same address (see GT-005)."
+   ],
+   "callsign": "TEL1",
+   "confidence": 0.95,
+   "detection_id": "GT-004",
+   "evidence": [
+    {
+     "field": "implied_speed_kt",
+     "observed": 107971,
+     "threshold": 960,
+     "ts": 1640.5
+    }
+   ],
+   "explanation": "Position jumped 150.0 NM in 5.0 s (107971 kt implied, ceiling 960 kt) within one track segment.",
+   "first_ts": 1640.5,
+   "icao": "adfaf7",
+   "injected": true,
+   "last_ts": 1640.5,
+   "severity": "high",
+   "source": "recorded"
+  },
+  {
+   "benign_causes": [
+    "Extreme pressure systems (tropical cyclones) or extreme temperatures.",
+    "GNSS receiver acquiring or degraded (low NIC), or a faulty altitude source.",
+    "Altitude reported in 100 ft steps by older transponders near the band edge."
+   ],
+   "callsign": "ALT1",
+   "confidence": 0.85,
+   "detection_id": "GT-007",
+   "evidence": [
+    {
+     "field": "alt_geom_minus_baro_ft",
+     "observed": 8000.0,
+     "threshold": 3450,
+     "ts": 1980.5
+    },
+    {
+     "field": "alt_geom_minus_baro_ft",
+     "observed": 8000.0,
+     "threshold": 3450,
+     "ts": 1995.499
+    },
+    {
+     "field": "alt_geom_minus_baro_ft",
+     "observed": 8000.0,
+     "threshold": 3450,
+     "ts": 2000.5
+    },
+    {
+     "field": "alt_geom_minus_baro_ft",
+     "observed": 8000.0,
+     "threshold": 3450,
+     "ts": 2005.5
+    },
+    {
+     "field": "alt_geom_minus_baro_ft",
+     "observed": 8000.0,
+     "threshold": 3450,
+     "ts": 2010.499
+    },
+    {
+     "field": "alt_geom_minus_baro_ft",
+     "observed": 8000.0,
+     "threshold": 3450,
+     "ts": 1980.5
+    }
+   ],
+   "explanation": "Geometric altitude differed from pressure altitude by up to +8000 ft over 145 s (24 reports), beyond the 3450 ft band allowed for pressure, temperature and geoid effects.",
+   "first_ts": 1980.5,
+   "icao": "adfbb1",
+   "injected": true,
+   "last_ts": 2125.5,
+   "severity": "medium",
+   "source": "recorded"
+  },
+  {
+   "benign_causes": [
+    "Aircraft transferred to a new State of registry before its transponder address was reprogrammed.",
+    "US aircraft re-registered with a new N-number but still transmitting the old Mode S code.",
+    "Error in the registration database used by the data source."
+   ],
+   "callsign": "REG1",
+   "confidence": 0.6,
+   "detection_id": "GT-006",
+   "evidence": [
+    {
+     "field": "icao",
+     "observed": "adfc10",
+     "threshold": "a061d9",
+     "ts": 2400.999
+    }
+   ],
+   "explanation": "Registration N12345 is a US N-number, whose Mode S address is a061d9, but the aircraft transmits adfc10 (a United States block).",
+   "first_ts": 2400.999,
+   "icao": "adfc10",
+   "injected": true,
+   "last_ts": 2475.999,
+   "severity": "medium",
+   "source": "recorded"
+  },
+  {
+   "benign_causes": [
+    "Aircraft transferred to a new State of registry before its transponder address was reprogrammed.",
+    "US aircraft re-registered with a new N-number but still transmitting the old Mode S code.",
+    "Error in the registration database used by the data source."
+   ],
+   "callsign": "REG2",
+   "confidence": 0.5,
+   "detection_id": "GT-006",
+   "evidence": [
+    {
+     "field": "address_state",
+     "observed": "United States",
+     "threshold": "United Kingdom",
+     "ts": 2400.999
+    }
+   ],
+   "explanation": "Address adfd59 is in the United States allocation (ICAO Annex 10 Table 9-1) but registration G-ZZZA carries the nationality mark of United Kingdom.",
+   "first_ts": 2400.999,
+   "icao": "adfd59",
+   "injected": true,
+   "last_ts": 2475.999,
+   "severity": "medium",
+   "source": "recorded"
+  },
+  {
+   "benign_causes": [
+    "MLAT solution jumping between geometries (mitigated by the 1 NM MLAT allowance).",
+    "A bad GNSS/INS position from the aircraft (often with a low NACp).",
+    "Two aircraft briefly using the same address (see GT-005)."
+   ],
+   "callsign": "SWA4991",
+   "confidence": 0.95,
+   "detection_id": "GT-004",
+   "evidence": [
+    {
+     "field": "implied_speed_kt",
+     "observed": 15450,
+     "threshold": 960,
+     "ts": 2821.0
+    }
+   ],
+   "explanation": "Position jumped 20.4 NM in 4.8 s (15450 kt implied, ceiling 960 kt) within one track segment.",
+   "first_ts": 2821.0,
+   "icao": "a2d3b3",
+   "injected": true,
+   "last_ts": 2821.0,
+   "severity": "high",
+   "source": "recorded"
+  }
+ ],
+ "cycle_s": 3600.0,
+ "inputs_digest": "3513aef912f410814d35f05e1bf5e0a347a3142dc252a09704a6f1271a67e45a",
+ "region": "socal",
+ "schedule": [
+  {
+   "inject_offset_s": 300.0,
+   "scenario": "single_ghost"
+  },
+  {
+   "inject_offset_s": 720.0,
+   "scenario": "ghost_flood"
+  },
+  {
+   "inject_offset_s": 1140.0,
+   "scenario": "icao_hijack"
+  },
+  {
+   "inject_offset_s": 1560.0,
+   "scenario": "teleport"
+  },
+  {
+   "inject_offset_s": 1980.0,
+   "scenario": "altitude_spoof"
+  },
+  {
+   "inject_offset_s": 2400.0,
+   "scenario": "registration_mismatch"
+  },
+  {
+   "inject_offset_s": 2820.0,
+   "scenario": "position_offset"
+  }
+ ],
+ "snapshots": 602,
+ "version": 1
+}

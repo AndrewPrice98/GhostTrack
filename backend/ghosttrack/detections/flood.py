@@ -108,7 +108,7 @@ def gt009_ghost_flood(tracks: Mapping[str, Track], ctx: Context) -> Evaluation:
             confidence=conf,
             evidence=(
                 Evidence("new_addresses", n, min_new, t0),
-                Evidence("addresses", [m.icao for m in members], None, t0),
+                Evidence("addresses", sorted(m.icao for m in members), None, t0),
                 Evidence("appearance_span_s", round(t1 - t0, 1), window, t1),
                 Evidence("gs_range_kt", round(max(gs) - min(gs), 1), gs_spread, t1),
             ),

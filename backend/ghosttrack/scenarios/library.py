@@ -66,6 +66,9 @@ class Scenario:
     expected: tuple[str, ...]  # detection ids that must fire on the scenario's addresses
     build: Callable[[Sequence[Snapshot], random.Random], ScenarioRun]
     seed: int
+    # A documented gap: the behaviour is a known blind spot, so no detection is expected to fire
+    # (validation passes when none does). Gap scenarios are not part of ``SCENARIOS``.
+    gap: bool = False
 
     def apply(self, snapshots: Sequence[Snapshot]) -> ScenarioRun:
         run = self.build(sorted(snapshots, key=lambda s: s.ts), random.Random(self.seed))
@@ -228,6 +231,36 @@ def _position_offset(snaps, rng):
     return ScenarioRun("", out, snaps[start].ts, frozenset({target}), count)
 
 
+# Per-poll drift for the gradual-drift gap scenario, and the total shift it stops at.
+DRIFT_NM_PER_POLL = 0.1
+DRIFT_MAX_NM = 20.0
+
+
+def _gradual_drift(snaps, rng):
+    """A real track dragged away from the truth a little each poll (a "drag-off")."""
+    start = _inject_index(snaps)
+    cands = _candidates(snaps, start, min(len(snaps) - start, 60))
+    if not cands:
+        raise ValueError("no suitable real aircraft for the drift scenario")
+    target = rng.choice(cands)
+    bearing = rng.uniform(0, 360)
+    out, count = [], 0
+    for i, s in enumerate(snaps):
+        if i >= start:
+            fixed = []
+            for a in s.aircraft:
+                if a.icao == target:
+                    shift = min(DRIFT_MAX_NM, DRIFT_NM_PER_POLL * (i - start + 1))
+                    la, lo = destination(a.lat, a.lon, bearing, shift)
+                    a = replace(a, lat=la, lon=lo, injected=True)
+                    count += 1
+                fixed.append(a)
+            out.append(Snapshot(s.ts, fixed))
+        else:
+            out.append(s)
+    return ScenarioRun("", out, snaps[start].ts, frozenset({target}), count)
+
+
 def _teleport(snaps, rng):
     start = _inject_index(snaps)
     n = min(24, len(snaps) - start)
@@ -295,9 +328,10 @@ SCENARIOS: tuple[Scenario, ...] = (
         ("GT-005",), _icao_hijack, seed=1003,
     ),
     Scenario(
-        "position_offset", "Position offset (20 NM)",
-        "A real, recorded aircraft's reported position is shifted 20 NM mid-flight and stays "
-        "shifted, as if its position source had been spoofed or its messages modified in transit.",
+        "position_offset", "Position step (20 NM)",
+        "A real, recorded aircraft's reported position steps 20 NM sideways in a single report and "
+        "stays shifted, as if its messages had been modified in transit. This is a step, not a "
+        "gradual drag-off: it is caught at the instant of the jump (see the gradual_drift gap).",
         "Message modification: Schaefer et al., ACNS 2013. GNSS spoofing of position sources: "
         "Humphreys et al., ION GNSS 2008.",
         ("GT-004",), _position_offset, seed=1004,
@@ -327,8 +361,23 @@ SCENARIOS: tuple[Scenario, ...] = (
 )
 
 
+GAP_SCENARIOS: tuple[Scenario, ...] = (
+    Scenario(
+        "gradual_drift", "Gradual drift (documented gap)",
+        f"A real, recorded aircraft's reported position is dragged away by {DRIFT_NM_PER_POLL} NM "
+        f"per poll up to {DRIFT_MAX_NM:g} NM. Each step is small enough to stay inside the "
+        "kinematic limits, so no detection fires: a slow drag-off by a consistent spoofer is a "
+        "known blind spot of single-receiver plausibility checks.",
+        "GNSS drag-off spoofing: Humphreys et al., ION GNSS 2008; the need for independent "
+        "multilateration or receiver cross-checks: Strohmeier et al., IEEE Commun. Surveys & "
+        "Tutorials 2015.",
+        (), _gradual_drift, seed=1008, gap=True,
+    ),
+)
+
+
 def scenario_by_id(scenario_id: str) -> Scenario:
-    for s in SCENARIOS:
+    for s in (*SCENARIOS, *GAP_SCENARIOS):
         if s.id == scenario_id:
             return s
     raise KeyError(scenario_id)

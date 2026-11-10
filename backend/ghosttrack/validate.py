@@ -25,7 +25,7 @@ from ghosttrack.catalog import load_catalog
 from ghosttrack.detections import Context, analyse
 from ghosttrack.detections.base import SEVERITIES, Finding
 from ghosttrack.model import Snapshot
-from ghosttrack.scenarios import SCENARIOS, Scenario
+from ghosttrack.scenarios import GAP_SCENARIOS, SCENARIOS, Scenario
 
 RECORDINGS_DIR = Path(__file__).resolve().parents[1] / "data" / "recordings"
 DEFAULT_RECORDING = "socal-a.jsonl.gz"
@@ -53,6 +53,7 @@ class ValidationResult:
     passed: bool
     time_to_detect_s: float | None
     collateral: int = 0  # medium+ findings on addresses the scenario did not touch
+    gap: bool = False  # documented blind spot: passes only while NOTHING fires
 
 
 def _attributed(findings: Sequence[Finding], addresses: frozenset[str]) -> list[Finding]:
@@ -97,12 +98,17 @@ def run_scenario(scenario: Scenario, snapshots: Sequence[Snapshot], ctx: Context
     an = analyse(run.snapshots, Context(catalog=ctx.catalog))
     attributed = _attributed(an.findings, run.addresses)
     fired = tuple(sorted({f.detection_id for f in attributed}))
-    passed = set(scenario.expected) <= set(fired)
-    ttd = _time_to_detect(run, scenario.expected, ctx) if passed else None
+    if scenario.gap:
+        # A documented blind spot passes while nothing fires. If a detection starts to catch it
+        # the gap is closed and the scenario must be promoted into SCENARIOS with an expectation.
+        passed = not fired
+    else:
+        passed = set(scenario.expected) <= set(fired)
+    ttd = _time_to_detect(run, scenario.expected, ctx) if passed and not scenario.gap else None
     min_sev = SEVERITIES.index(ctx.catalog["validation"]["budget_min_severity"])
     mine = {id(f) for f in attributed}
     collateral = sum(1 for f in an.findings if id(f) not in mine and SEVERITIES.index(f.severity) >= min_sev)
-    return ValidationResult(scenario.id, scenario.expected, fired, passed, ttd, collateral)
+    return ValidationResult(scenario.id, scenario.expected, fired, passed, ttd, collateral, scenario.gap)
 
 
 def run_validation(
@@ -113,6 +119,16 @@ def run_validation(
         snapshots = load_recording(RECORDINGS_DIR / DEFAULT_RECORDING)
     ctx = ctx or Context()
     return [run_scenario(s, snapshots, ctx) for s in SCENARIOS]
+
+
+def run_gap_validation(
+    snapshots: Sequence[Snapshot] | None = None, ctx: Context | None = None
+) -> list[ValidationResult]:
+    """Run the documented-gap scenarios: each passes only while no detection fires on it."""
+    if snapshots is None:
+        snapshots = load_recording(RECORDINGS_DIR / DEFAULT_RECORDING)
+    ctx = ctx or Context()
+    return [run_scenario(s, snapshots, ctx) for s in GAP_SCENARIOS]
 
 
 # ------------------------------------------------------------------ false positives
@@ -160,10 +176,22 @@ def budget_exceeded(results: Sequence[RecordingFP], catalog: dict | None = None)
     return [r for r in results if r.per_hour > budget]
 
 
+def budget_looser_than_rule(results: Sequence[RecordingFP], catalog: dict | None = None) -> tuple[float, float] | None:
+    """(catalog budget, budget the rule gives) when the catalog is looser than the rule, else None."""
+    cat = catalog or load_catalog()
+    stored, rule = float(cat["validation"]["fp_budget_per_hour"]), fp_budget(results, cat)
+    return (stored, rule) if stored > rule + 1e-9 else None
+
+
 # ------------------------------------------------------------------ report
 
 
-def format_report(results: Sequence[ValidationResult], fps: Sequence[RecordingFP], catalog: dict | None = None) -> str:
+def format_report(
+    results: Sequence[ValidationResult],
+    fps: Sequence[RecordingFP],
+    catalog: dict | None = None,
+    gaps: Sequence[ValidationResult] = (),
+) -> str:
     cat = catalog or load_catalog()
     lines = ["Scenario validation (injected test data)", ""]
     head = f"{'scenario':<24}{'expected':<10}{'fired':<30}{'result':<8}{'time to detect':>15}"
@@ -174,6 +202,12 @@ def format_report(results: Sequence[ValidationResult], fps: Sequence[RecordingFP
             f"{r.scenario:<24}{','.join(r.expected):<10}{','.join(r.fired) or '-':<30}"
             f"{'PASS' if r.passed else 'FAIL':<8}{ttd:>15}"
         )
+    if gaps:
+        lines += ["", "Documented gaps (expected NOT to fire: known blind spots)", ""]
+        head = f"{'scenario':<24}{'fired':<30}{'result':<8}"
+        lines += [head, "-" * len(head)]
+        for r in gaps:
+            lines.append(f"{r.scenario:<24}{','.join(r.fired) or 'none':<30}{'GAP HOLDS' if r.passed else 'GAP CLOSED':<8}")
     budget = float(cat["validation"]["fp_budget_per_hour"])
     sev = cat["validation"]["budget_min_severity"]
     lines += ["", f"Clean recordings: findings (budget counts severity >= {sev}: {budget:g} per hour)", ""]
@@ -182,4 +216,7 @@ def format_report(results: Sequence[ValidationResult], fps: Sequence[RecordingFP
     for r in fps:
         detail = ", ".join(f"{d}/{s}={n}" for (d, s), n in r.counts.items()) or "none"
         lines.append(f"{r.recording:<20}{r.hours:>7.2f}{r.tracks:>8}{r.counted:>9}{r.per_hour:>10.2f}  {detail}")
+    loose = budget_looser_than_rule(fps, cat)
+    if loose:
+        lines += ["", f"NOTE: catalog budget {loose[0]:g}/h is looser than the rule gives ({loose[1]:g}/h)."]
     return "\n".join(lines)

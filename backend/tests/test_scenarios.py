@@ -212,3 +212,82 @@ def test_budget_rule_and_counting(tmp_path, clean):
             fh.write(json.dumps(s.to_dict()) + "\n")
     dirty = V.measure_recording(path)
     assert dirty.counted >= 1 and dirty.per_hour > float(cat["validation"]["fp_budget_per_hour"])
+
+
+# ------------------------------------------------------------------ documented gap, TTD resolution, budget
+
+
+def test_gradual_drift_is_a_documented_gap_that_does_not_fire(clean):
+    from ghosttrack.scenarios import GAP_SCENARIOS
+
+    (drift,) = GAP_SCENARIOS
+    assert drift.gap and not drift.expected and drift.id == "gradual_drift"
+    assert drift not in SCENARIOS  # gaps are never scheduled into the demo
+    (r,) = V.run_gap_validation(clean)
+    assert r.gap and r.passed and r.fired == ()
+    run = drift.apply(clean)
+    (target,) = run.addresses
+    # Real drift happened: the injected positions end up many NM from the truth, labelled injected.
+    worst = 0.0
+    for orig, out in zip(clean, run.snapshots):
+        for a, b in zip((x for x in orig.aircraft if x.icao == target), (x for x in out.aircraft if x.icao == target)):
+            if b.injected:
+                worst = max(worst, haversine_nm(a.lat, a.lon, b.lat, b.lon))
+    assert worst > 10
+    an = V.analyse(run.snapshots)
+    assert [f for f in an.findings if f.icao == target] == []
+
+
+def test_gap_validation_fails_when_a_detection_starts_catching_the_drift(clean):
+    """If a (hypothetical) detection fires, the gap is closed and the check says so."""
+    from ghosttrack.scenarios import GAP_SCENARIOS
+
+    cat = copy.deepcopy(load_catalog())
+    # Make GT-004 (position jumps) hair-trigger: the slow drift then trips it.
+    for k, v in cat["by_id"]["GT-004"]["thresholds"].items():
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and "nm" in k:
+            cat["by_id"]["GT-004"]["thresholds"][k] = 0.01
+    r = V.run_scenario(GAP_SCENARIOS[0], clean, Context(catalog=cat))
+    assert r.gap
+    assert (r.passed is False) == bool(r.fired)  # passes iff nothing fired
+
+
+def test_position_offset_text_describes_a_step_not_a_drag_off():
+    s = scenario_by_id("position_offset")
+    assert "step" in s.simulates.lower() and "single report" in s.simulates
+    assert "drift" in s.simulates  # points readers to the gradual_drift gap
+
+
+def test_cli_validate_reports_gaps(capsys):
+    assert main(["validate"]) == 0
+    out = capsys.readouterr().out
+    assert "gradual_drift" in out and "GAP HOLDS" in out
+
+
+def test_time_to_detect_resolution_is_the_poll_interval(results, clean):
+    """TTD is measured at snapshot granularity, so it is a multiple of the poll gaps."""
+    times = sorted(s.ts for s in clean)
+    gaps = sorted(b - a for a, b in zip(times, times[1:]))
+    poll = gaps[len(gaps) // 2]  # median poll interval of the recording
+    assert 4.0 <= poll <= 12.0
+    for r in results:
+        # Every TTD is a difference of two snapshot times, so it cannot be finer than one poll
+        # unless it is exactly 0 (detected on the very first injected report).
+        assert r.time_to_detect_s == 0 or r.time_to_detect_s >= min(gaps) - 1e-6
+
+
+def test_catalog_budget_is_not_looser_than_the_rule():
+    cat = load_catalog()
+    fps = V.measure_false_positives()
+    assert float(cat["validation"]["fp_budget_per_hour"]) >= V.fp_budget(fps, cat)  # never tighter than measured
+    assert V.budget_looser_than_rule(fps, cat) is None  # and not looser than the rule gives
+
+
+def test_report_flags_a_budget_looser_than_the_rule(clean):
+    cat = copy.deepcopy(load_catalog())
+    fps = V.measure_false_positives()
+    ok = V.format_report([], fps, cat)
+    assert "looser than the rule" not in ok
+    cat["validation"]["fp_budget_per_hour"] = 5.0
+    assert V.budget_looser_than_rule(fps, cat) == (5.0, V.fp_budget(fps, cat))
+    assert "NOTE: catalog budget 5/h is looser than the rule gives" in V.format_report([], fps, cat)

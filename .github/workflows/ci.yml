@@ -24,8 +24,9 @@ jobs:
       - name: Tests
         working-directory: backend
         run: python -m pytest -q
-      # Placeholder for later tasks: add a "recorded data is current" check
-      # (for example the ICAO allocation table build) once it exists.
+      - name: Demo fixture is current
+        working-directory: backend
+        run: python scripts/build_demo.py --check
 
   frontend:
     # Placeholder until the frontend scaffold lands in a later task.
