@@ -28,9 +28,9 @@ def auth_env(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def fresh_catch_up_throttle():
-    demo._last_run = None
+    demo._last_run.clear()
     yield
-    demo._last_run = None
+    demo._last_run.clear()
 
 
 @pytest.fixture

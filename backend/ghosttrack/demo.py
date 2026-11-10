@@ -55,7 +55,7 @@ SCHEDULE: tuple[tuple[str, float], ...] = (
 
 _lock = threading.Lock()  # one catch-up at a time per process
 _seed_lock = threading.Lock()
-_last_run: float | None = None  # time.monotonic() of the last catch-up
+_last_run: dict[str, float] = {}  # region -> time.monotonic() of its last successful catch-up
 
 
 # ------------------------------------------------------------------ the cycle
@@ -124,6 +124,8 @@ def build_fixture() -> dict:
 
     snaps = cycle_snapshots()
     rows = alert_rows(analyse(snaps), "recorded")
+    for row in rows:
+        row["detected_at"] = _detected_at(snaps, row)
     return _round({
         "version": FIXTURE_VERSION,
         "inputs_digest": inputs_digest(),
@@ -133,6 +135,39 @@ def build_fixture() -> dict:
         "schedule": [{"scenario": s, "inject_offset_s": t} for s, t in SCHEDULE],
         "alerts": rows,
     })
+
+
+DETECT_LOOKBACK_S = 400.0  # history given to the prefix replay (longer than GT-009's warm-up)
+DETECT_MATCH_S = 120.0  # a prefix finding is the template's episode when its start is this close
+
+
+def _detected_at(snaps, row: dict) -> float:
+    """Cycle offset of the first snapshot at which a replay of the data so far already raises
+    this alert (the same prefix replay and binary search as ``validate._time_to_detect``).
+    The replay starts ``DETECT_LOOKBACK_S`` before the episode, which keeps it fast."""
+    from ghosttrack.detections import analyse
+
+    offs = [s.ts for s in snaps]
+    start = bisect.bisect_left(offs, row["first_ts"] - DETECT_LOOKBACK_S)
+    lo = max(start, bisect.bisect_left(offs, row["first_ts"]))
+    hi = min(bisect.bisect_left(offs, row["last_ts"]), len(snaps) - 1)
+
+    def fired(i: int) -> bool:
+        return any(
+            f.detection_id == row["detection_id"] and f.icao == row["icao"]
+            and abs(f.ts_first - row["first_ts"]) <= DETECT_MATCH_S
+            for f in analyse(snaps[start : i + 1]).findings
+        )
+
+    if hi < lo or not fired(hi):
+        return row["last_ts"]  # not reproducible on a prefix: fall back to the episode end
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if fired(mid):
+            hi = mid
+        else:
+            lo = mid + 1
+    return max(row["first_ts"], offs[lo])
 
 
 def fixture_json(fixture: dict) -> str:
@@ -155,11 +190,16 @@ def load_templates() -> tuple[dict, ...]:
     return tuple(fixture["alerts"])
 
 
-def stamp_alert(template: dict, cycle_start: float) -> dict:
-    row = dict(template)
+def stamp_alert(template: dict, cycle_start: float, now_ts: float | None = None) -> dict:
+    """The template on the wall clock. With ``now_ts`` only what has happened by then is kept:
+    last_ts is clipped to now and later evidence is left out (a later catch-up extends it)."""
+    row = {k: v for k, v in template.items() if k != "detected_at"}
     row["first_ts"] = template["first_ts"] + cycle_start
     row["last_ts"] = template["last_ts"] + cycle_start
     row["evidence"] = [{**e, "ts": e["ts"] + cycle_start} for e in template["evidence"]]
+    if now_ts is not None:
+        row["last_ts"] = min(row["last_ts"], now_ts)
+        row["evidence"] = [e for e in row["evidence"] if e["ts"] <= now_ts]
     return row
 
 
@@ -187,16 +227,22 @@ def _stamp(conn, now_ts: float, region: str) -> int:
         for snap in snaps[i:j]:
             if db.store_snapshot(conn, "recorded", region, Snapshot(base + snap.ts, snap.aircraft), commit=False):
                 stored += 1
-    # Alerts for the retention period whose detection time (end of the episode) has passed.
+    # Alerts for the retention period, published once their detection time has passed.
     alert_lo = now_ts - config.ALERT_RETENTION_HOURS * 3600.0
-    have = {r[0] for r in conn.execute("SELECT fingerprint FROM alerts WHERE source = 'recorded'")}
+    have: dict[tuple, list[tuple[float, float]]] = {}
+    for r in conn.execute("SELECT detection_id, icao, first_ts, last_ts FROM alerts WHERE source = 'recorded'"):
+        have.setdefault((r[0], r[1]), []).append((r[2], r[3]))
     for c in _cycles(alert_lo, now_ts):
         base = c * CYCLE_S
         for t in load_templates():
-            row = stamp_alert(t, base)
-            if alert_lo <= row["last_ts"] <= now_ts:
-                if db.fingerprint("recorded", row["detection_id"], row["icao"], row["first_ts"]) not in have:
-                    db.upsert_alert(conn, row, commit=False)
+            if base + t["last_ts"] < alert_lo or base + t.get("detected_at", t["last_ts"]) > now_ts:
+                continue
+            row = stamp_alert(t, base, now_ts)
+            # Skip when an existing alert (this one, or the one it merged into) already covers it.
+            if any(f <= row["first_ts"] and l >= row["last_ts"] for f, l in have.get((row["detection_id"], row["icao"]), ())):
+                continue
+            db.upsert_alert(conn, row, commit=False)
+            have.setdefault((row["detection_id"], row["icao"]), []).append((row["first_ts"], row["last_ts"]))
     db.prune(conn, now_ts, commit=False)
     return stored
 
@@ -210,13 +256,12 @@ def catch_up(
     fingerprinted. At most one catch-up runs at a time per process, and calls closer together
     than ``throttle_seconds`` return 0 without doing anything.
     """
-    global _last_run
     now_ts = time.time() if now_ts is None else now_ts
     with _lock:
         mono = time.monotonic()
-        if throttle_seconds and _last_run is not None and mono - _last_run < throttle_seconds:
+        last = _last_run.get(region)
+        if throttle_seconds and last is not None and mono - last < throttle_seconds:
             return 0
-        _last_run = mono
         conn.commit()  # no transaction may be open when taking the write lock
         conn.execute("BEGIN IMMEDIATE")
         try:
@@ -225,6 +270,7 @@ def catch_up(
         except BaseException:
             conn.rollback()
             raise
+        _last_run[region] = mono  # only a successful catch-up starts the throttle
         return stored
 
 
@@ -291,6 +337,18 @@ def scheduled_scenarios(now_ts: float) -> list[ScheduledScenario]:
         sc = scenario_by_id(sid)
         out.append(ScheduledScenario(sid, sc.title, base + t, base + t <= now_ts))
     return out
+
+
+def cycle_snapshot_at(now_ts: float) -> Snapshot:
+    """The replay snapshot current at ``now_ts`` straight from the in-memory cycle (no database):
+    the fallback when SQLite is unavailable. Stamped like the stored one."""
+    snaps = cycle_snapshots()
+    base = (now_ts // CYCLE_S) * CYCLE_S
+    i = bisect.bisect_right(cycle_offsets(), now_ts - base) - 1
+    if i < 0:  # before the first snapshot of this cycle: the previous cycle's last
+        base -= CYCLE_S
+        i = len(snaps) - 1
+    return Snapshot(base + snaps[i].ts, snaps[i].aircraft)
 
 
 def recorded_snapshot(conn, now_ts: float, region: str = REGION) -> Snapshot | None:

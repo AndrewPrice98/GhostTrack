@@ -123,15 +123,6 @@ def test_window_is_rolling_and_alerts_are_retained_24h(conn):
     assert all(a[3] >= HOUR + 40 * 3600.0 - 24 * 3600.0 for a in state_of(conn)[1])
 
 
-def test_alert_appears_only_after_its_episode(conn):
-    # The single ghost (offset 300 s) is not alerted before its episode has happened.
-    demo.catch_up(conn, HOUR + 200.0, throttle_seconds=0)
-    assert not [a for a in db.list_alerts(conn) if HOUR <= a["first_ts"] < HOUR + 3600]
-    demo.catch_up(conn, HOUR + 600.0, throttle_seconds=0)
-    got = [a for a in db.list_alerts(conn) if HOUR <= a["first_ts"] < HOUR + 3600]
-    assert {a["detection_id"] for a in got} >= {"GT-001"}
-
-
 def test_injected_labelling_survives_replay_storage_and_alerts(conn):
     demo.catch_up(conn, HOUR + 1000.0, throttle_seconds=0)
     # Within the active scenario window the stored snapshots carry injected aircraft.

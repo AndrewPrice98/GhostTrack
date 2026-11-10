@@ -29,20 +29,25 @@ jobs:
         run: python scripts/build_demo.py --check
 
   frontend:
-    # Placeholder until the frontend scaffold lands in a later task.
-    if: hashFiles('package.json') != ''
+    # Placeholder until the frontend scaffold lands in a later task. A job-level hashFiles()
+    # condition is invalid, so each step after checkout carries the condition instead.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - if: hashFiles('package.json') != ''
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm run build
-      - run: npm audit --audit-level=high
+      - if: hashFiles('package.json') != ''
+        run: npm ci
+      - if: hashFiles('package.json') != ''
+        run: npm test
+      - if: hashFiles('package.json') != ''
+        run: npm run build
+      - if: hashFiles('package.json') != ''
+        run: npm audit --audit-level=high
 
   audit:
     runs-on: ubuntu-latest

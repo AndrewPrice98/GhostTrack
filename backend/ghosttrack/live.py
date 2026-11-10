@@ -15,6 +15,7 @@ view overlays the replay's currently injected states, and every one of them keep
 from __future__ import annotations
 
 import logging
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass
@@ -27,7 +28,9 @@ log = logging.getLogger("ghosttrack.live")
 
 CACHE_CONTROL = "s-maxage=10, stale-while-revalidate=30"
 FALLBACK_NOTICE = "Live feed unavailable; showing recorded traffic"
+STORAGE_NOTICE = "Storage unavailable; showing recorded traffic"
 MODES = ("recorded", "live")
+STALE_WHILE_REVALIDATE_S = 30.0  # matches the stale-while-revalidate in CACHE_CONTROL
 
 
 def response_headers() -> dict[str, str]:
@@ -41,10 +44,15 @@ class LiveResult:
     fetched_at: float | None
     from_cache: bool
     error: str | None = None
+    stale: bool = False  # an older good snapshot served inside the stale-while-revalidate window
 
 
 class LiveFeed:
-    """Per-instance upstream gateway. One instance per process; tests make their own."""
+    """Per-instance upstream gateway. One instance per process; tests make their own.
+
+    ``clock`` is the wall clock (used for ages and by tests); the throttle uses ``monotonic`` so a
+    wall-clock step cannot cause a burst of requests or a long freeze.
+    """
 
     def __init__(
         self,
@@ -52,14 +60,17 @@ class LiveFeed:
         clock: Callable[[], float] = time.time,
         interval_s: float | None = None,
         connect: Callable[[], Any] = db.connect,
+        monotonic: Callable[[], float] | None = None,
     ) -> None:
         self._fetch = fetch or upstream.fetch_snapshot
         self.clock = clock
+        # A custom wall clock (tests) drives the throttle too, unless a monotonic one is given.
+        self._mono = monotonic or (time.monotonic if clock is time.time else clock)
         self._interval = interval_s
         self._connect = connect
         self._lock = threading.Lock()
         self._last_attempt: dict[str, float] = {}
-        self._cache: dict[str, tuple[Snapshot, float]] = {}
+        self._cache: dict[str, tuple[Snapshot, float]] = {}  # region -> (snapshot, monotonic time)
         self._error: dict[str, str | None] = {}
         self.upstream_requests = 0
 
@@ -68,11 +79,26 @@ class LiveFeed:
         # The 10 s floor applies to whatever is configured or passed.
         return max(config.MIN_LIVE_INTERVAL_S, self._interval if self._interval is not None else config.live_interval_s())
 
+    def _serve(self, region: str, now: float, fetched_now: bool) -> LiveResult:
+        err = self._error.get(region)
+        cached = self._cache.get(region)
+        if cached is not None:
+            age = now - cached[1]
+            if err is None:
+                return LiveResult(cached[0], cached[1], not fetched_now)
+            if age <= STALE_WHILE_REVALIDATE_S:  # the last good picture is still fresh enough
+                return LiveResult(cached[0], cached[1], True, err, stale=True)
+        return LiveResult(None, None, not fetched_now, err or "no data yet")
+
     def current(self, region: str = demo.REGION) -> LiveResult:
         if region not in upstream.REGIONS:
             raise ValueError(f"unknown region {region!r}")
-        with self._lock:
-            now = self.clock()
+        if not self._lock.acquire(blocking=False):
+            # Another request is fetching: do not queue behind an 8 s upstream call, serve what
+            # there is (the cache, or the replay when there is none).
+            return self._serve(region, self._mono(), False)
+        try:
+            now = self._mono()
             last = self._last_attempt.get(region)
             fetched_now = False
             if last is None or now - last >= self.interval_s or now < last:
@@ -82,27 +108,30 @@ class LiveFeed:
                 try:
                     result = self._fetch(region)
                     snap = result[0] if isinstance(result, tuple) else result
-                    self._store(region, snap, now)
-                    self._cache[region] = (snap, now)
-                    self._error[region] = None
-                except Exception as exc:  # any failure falls back to the recorded replay
+                except Exception as exc:  # any failure falls back (stale cache, else the replay)
                     if not isinstance(exc, (upstream.UpstreamError, OSError, ValueError)):
                         log.exception("Unexpected live fetch failure")
                     self._error[region] = f"{type(exc).__name__}: {exc}"
-            err = self._error.get(region)
-            cached = self._cache.get(region)
-            if err is None and cached is not None:
-                return LiveResult(cached[0], cached[1], not fetched_now)
-            return LiveResult(None, None, not fetched_now, err or "no data yet")
-
-    def _store(self, region: str, snap: Snapshot, now: float) -> None:
-        conn = self._connect()
-        try:
-            db.store_snapshot(conn, "live", region, snap)
-            pipeline.detect_window(conn, "live", region, snap.ts)
-            db.prune(conn, now)
+                else:
+                    self._cache[region] = (snap, now)
+                    self._error[region] = None
+                    self._store(region, snap)
+            return self._serve(region, now, fetched_now)
         finally:
-            conn.close()
+            self._lock.release()
+
+    def _store(self, region: str, snap: Snapshot) -> None:
+        """Persist the snapshot, detect and upsert. Storage trouble never hides live data."""
+        try:
+            conn = self._connect()
+            try:
+                db.store_snapshot(conn, "live", region, snap)
+                pipeline.detect_window(conn, "live", region, snap.ts)
+                db.prune(conn, snap.ts)  # same time base as the window itself
+            finally:
+                conn.close()
+        except Exception:  # sqlite3.Error or a detection bug: the picture is still good
+            log.exception("Could not store or analyse the live snapshot")
 
 
 def traffic_view(
@@ -118,10 +147,17 @@ def traffic_view(
         raise ValueError(f"unknown mode {mode!r}")
     if now_ts is None:
         now_ts = feed.clock() if feed is not None else time.time()
-    demo.catch_up(conn, now_ts, region=region)
-    replay = demo.recorded_snapshot(conn, now_ts, region)
-    replay_aircraft = replay.aircraft if replay else []
     notice = None
+    try:
+        demo.catch_up(conn, now_ts, region=region)
+        replay = demo.recorded_snapshot(conn, now_ts, region)
+    except sqlite3.Error:
+        # The database is unusable (read-only or missing /tmp, locked, corrupt): the replay is a
+        # pure function of the clock, so serve it straight from the in-memory cycle.
+        log.exception("Database unavailable; serving the replay from memory")
+        replay = demo.cycle_snapshot_at(now_ts)
+        notice = STORAGE_NOTICE
+    replay_aircraft = replay.aircraft if replay else []
     source = "recorded"
     ts = replay.ts if replay else now_ts
     aircraft = [a.to_dict() for a in replay_aircraft]
@@ -129,6 +165,7 @@ def traffic_view(
         result = (feed or default_feed()).current(region)
         if result.snapshot is not None:
             source = "live"
+            notice = None  # the live picture is fine even if the replay overlay came from memory
             ts = result.snapshot.ts
             live_icaos = {a.icao for a in result.snapshot.aircraft}
             aircraft = [a.to_dict() for a in result.snapshot.aircraft]

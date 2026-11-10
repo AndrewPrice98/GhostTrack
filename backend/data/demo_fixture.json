@@ -8,6 +8,7 @@
    ],
    "callsign": "GHO1",
    "confidence": 0.809,
+   "detected_at": 315.0,
    "detection_id": "GT-001",
    "evidence": [
     {
@@ -63,6 +64,7 @@
    ],
    "callsign": "GHO1",
    "confidence": 0.796,
+   "detected_at": 319.999,
    "detection_id": "GT-004",
    "evidence": [
     {
@@ -118,6 +120,7 @@
    ],
    "callsign": null,
    "confidence": 0.95,
+   "detected_at": 735.0,
    "detection_id": "GT-009",
    "evidence": [
     {
@@ -192,6 +195,7 @@
    ],
    "callsign": "TAI561",
    "confidence": 0.95,
+   "detected_at": 1159.999,
    "detection_id": "GT-004",
    "evidence": [
     {
@@ -246,6 +250,7 @@
    ],
    "callsign": "TAI561",
    "confidence": 0.8,
+   "detected_at": 1170.0,
    "detection_id": "GT-005",
    "evidence": [
     {
@@ -301,6 +306,7 @@
    ],
    "callsign": "TEL1",
    "confidence": 0.95,
+   "detected_at": 1640.5,
    "detection_id": "GT-004",
    "evidence": [
     {
@@ -326,6 +332,7 @@
    ],
    "callsign": "ALT1",
    "confidence": 0.85,
+   "detected_at": 2000.5,
    "detection_id": "GT-007",
    "evidence": [
     {
@@ -381,6 +388,7 @@
    ],
    "callsign": "REG1",
    "confidence": 0.6,
+   "detected_at": 2400.999,
    "detection_id": "GT-006",
    "evidence": [
     {
@@ -406,6 +414,7 @@
    ],
    "callsign": "REG2",
    "confidence": 0.5,
+   "detected_at": 2400.999,
    "detection_id": "GT-006",
    "evidence": [
     {
@@ -431,6 +440,7 @@
    ],
    "callsign": "SWA4991",
    "confidence": 0.95,
+   "detected_at": 2821.0,
    "detection_id": "GT-004",
    "evidence": [
     {

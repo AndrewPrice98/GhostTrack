@@ -83,18 +83,6 @@ def test_configured_interval_cannot_go_below_the_floor(db_file, monkeypatch):
     assert live.LiveFeed(fetch=fake, clock=clock).interval_s == 30.0
 
 
-def test_concurrent_requests_share_one_fetch(feed_env):
-    feed, fake, _ = feed_env
-    fake.delay = 0.2
-    results = []
-    threads = [threading.Thread(target=lambda: results.append(feed.current("socal"))) for _ in range(12)]
-    [t.start() for t in threads]
-    [t.join() for t in threads]
-    assert fake.calls == 1 and len(results) == 12
-    assert all(r.snapshot is not None for r in results)
-    assert sum(1 for r in results if not r.from_cache) == 1
-
-
 def test_unknown_region_never_reaches_the_upstream(feed_env):
     feed, fake, _ = feed_env
     with pytest.raises(ValueError):

@@ -165,6 +165,14 @@ def default_status(severity: str) -> str:
     return "new" if severity in TRIAGE_SEVERITIES else "info"
 
 
+def _members(evidence: list[dict]) -> set[str]:
+    out: set[str] = set()
+    for e in evidence:
+        if e.get("field") == "addresses" and isinstance(e.get("observed"), list):
+            out.update(str(a) for a in e["observed"])
+    return out
+
+
 def upsert_alert(conn: sqlite3.Connection, row: dict[str, Any], *, commit: bool = True) -> str:
     """Insert an alert, or extend the one it continues. Returns "inserted" or "updated".
 
@@ -176,14 +184,26 @@ def upsert_alert(conn: sqlite3.Connection, row: dict[str, Any], *, commit: bool 
     and ``notes`` of an existing alert are never overwritten.
     """
     fp = fingerprint(row["source"], row["detection_id"], row["icao"], row["first_ts"])
-    existing = conn.execute("SELECT id, severity FROM alerts WHERE fingerprint = ?", (fp,)).fetchone()
+    existing = conn.execute("SELECT id, severity, status FROM alerts WHERE fingerprint = ?", (fp,)).fetchone()
     if existing is None and row["icao"] is not None:
         existing = conn.execute(
-            "SELECT id, severity FROM alerts WHERE source = ? AND detection_id = ? AND icao = ? "
+            "SELECT id, severity, status FROM alerts WHERE source = ? AND detection_id = ? AND icao = ? "
             "AND last_ts >= ? AND first_ts <= ? ORDER BY first_ts LIMIT 1",
             (row["source"], row["detection_id"], row["icao"],
              row["first_ts"] - MERGE_GAP_S, row["last_ts"] + MERGE_GAP_S),
         ).fetchone()
+    elif existing is None:
+        # A fleet finding has no address: the same episode is one that touches in time and
+        # shares at least one member address.
+        members = _members(row["evidence"])
+        for cand in conn.execute(
+            "SELECT id, severity, status, evidence_json FROM alerts WHERE source = ? AND detection_id = ? "
+            "AND icao IS NULL AND last_ts >= ? AND first_ts <= ? ORDER BY first_ts",
+            (row["source"], row["detection_id"], row["first_ts"] - MERGE_GAP_S, row["last_ts"] + MERGE_GAP_S),
+        ).fetchall():
+            if members & _members(json.loads(cand["evidence_json"])):
+                existing = cand
+                break
     evidence = json.dumps(row["evidence"], separators=(",", ":"))
     benign = json.dumps(list(row["benign_causes"]), separators=(",", ":"))
     if existing is None:
@@ -198,11 +218,14 @@ def upsert_alert(conn: sqlite3.Connection, row: dict[str, Any], *, commit: bool 
         result = "inserted"
     else:
         severity = max(existing["severity"], row["severity"], key=SEVERITIES.index)
+        # An alert that grows from below the triage level into it becomes "new"; a status the
+        # user set (acknowledged, dismissed) is never overwritten.
+        status = default_status(severity) if existing["status"] == "info" else existing["status"]
         conn.execute(
             "UPDATE alerts SET first_ts = MIN(first_ts, ?), last_ts = MAX(last_ts, ?), "
-            "injected = MAX(injected, ?), confidence = MAX(confidence, ?), severity = ?, "
+            "injected = MAX(injected, ?), confidence = MAX(confidence, ?), severity = ?, status = ?, "
             "callsign = COALESCE(?, callsign), explanation = ?, benign_json = ?, evidence_json = ? WHERE id = ?",
-            (row["first_ts"], row["last_ts"], int(bool(row["injected"])), row["confidence"], severity,
+            (row["first_ts"], row["last_ts"], int(bool(row["injected"])), row["confidence"], severity, status,
              row["callsign"], row["explanation"], benign, evidence, existing["id"]),
         )
         result = "updated"
