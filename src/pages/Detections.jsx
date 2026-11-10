@@ -3,7 +3,7 @@ import { api } from '../api.js'
 import {
   Chip, ErrorState, Icon, InjectedTag, Loading, PageHead, SeverityChip, useAsync, usePageTitle,
 } from '../components/ui.jsx'
-import { fmtNumber } from '../lib.js'
+import { fmtNumber, fmtTimeToDetect } from '../lib.js'
 import { fmtThreshold, humanKey } from '../replay.js'
 
 const SCOPES = { track: 'Per aircraft track', fleet: 'Across all aircraft' }
@@ -106,7 +106,7 @@ function ValidationTable({ rows, gap }) {
               </th>
               <td data-label="Expected"><Ids ids={r.expected} /></td>
               <td data-label="Fired"><Ids ids={r.fired} expected={r.expected} /></td>
-              <td className="num" data-label="Time to detect">{Number.isFinite(r.time_to_detect_s) ? `${fmtNumber(r.time_to_detect_s)} s` : '—'}</td>
+              <td className="num" data-label="Time to detect">{fmtTimeToDetect(r.time_to_detect_s)}</td>
               <td className="num" data-label="Collateral">{fmtNumber(r.collateral)}</td>
               <td data-label="Result"><ResultChip r={r} /></td>
             </tr>

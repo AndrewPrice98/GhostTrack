@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api.js'
-import { FormMessage, Icon, PageHead, usePageTitle, useSession } from '../components/ui.jsx'
-import { fmtNumber, plural } from '../lib.js'
+import { DemoNotice, FormMessage, Icon, PageHead, usePageTitle, useSession } from '../components/ui.jsx'
+import { fileTooLarge, fmtNumber, plural } from '../lib.js'
 
 const EXAMPLE = '{"ts": 1794316000.0, "aircraft": [{"icao": "a061d9", "callsign": "SWA123", "lat": 33.94, "lon": -118.41, "alt_baro_ft": 12000.0, "on_ground": false, "gs_kt": 310.0, "track_deg": 90.0, "category": "A3", "source": "adsb", "seen_pos_s": 0.1}]}'
 
@@ -23,6 +23,13 @@ function explain(err) {
     case 0: return err.message
     default: return `Not uploaded: ${err.message}`
   }
+}
+
+const MB = 1024 * 1024
+const tooLarge = (file, maxMb) => fileTooLarge(file?.size, maxMb)
+
+function sizeMessage(file, maxMb) {
+  return `This file is ${fmtNumber(file.size / MB, 1)} MB; the limit is ${fmtNumber(maxMb, 1)} MB. Cut the recording into shorter parts, or gzip it, and try again.`
 }
 
 function Result({ r }) {
@@ -63,7 +70,7 @@ function Result({ r }) {
 
 export default function Upload() {
   usePageTitle('Upload a recording')
-  const { guest, signIn } = useSession()
+  const { guest, signIn, maxUploadMb } = useSession()
   const input = useRef(null)
   const [file, setFile] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -93,6 +100,11 @@ export default function Upload() {
       input.current?.focus()
       return
     }
+    if (tooLarge(file, maxUploadMb)) {
+      setMessage({ tone: 'error', text: sizeMessage(file, maxUploadMb) })
+      input.current?.focus()
+      return
+    }
     setBusy(true)
     setMessage(null)
     setResult(null)
@@ -118,8 +130,12 @@ export default function Upload() {
           <h2 id="up-title">Recording file</h2>
           <label className="field">
             <span>JSON Lines recording (.jsonl or .jsonl.gz)</span>
-            <input ref={input} type="file" accept=".jsonl,.gz,.json,application/gzip,application/json,text/plain"
-              onChange={(e) => { setFile(e.target.files?.[0] || null); setMessage(null) }} />
+            <input ref={input} type="file" accept=".jsonl,.gz,application/gzip"
+              onChange={(e) => {
+                const f = e.target.files?.[0] || null
+                setFile(f)
+                setMessage(f && tooLarge(f, maxUploadMb) ? { tone: 'error', text: sizeMessage(f, maxUploadMb) } : null)
+              }} />
           </label>
           {file && <p className="small muted">{file.name} · {fmtNumber(file.size / 1024, 1)} KB</p>}
           <div className="form-actions">
@@ -128,8 +144,12 @@ export default function Upload() {
             </button>
             <FormMessage message={message} />
           </div>
+          <DemoNotice />
           <p className="small muted">
-            There is an upload size limit. A larger file is refused with a message that names the limit; nothing is stored in that case.
+            {Number.isFinite(maxUploadMb)
+              ? <>The upload limit on this server is {fmtNumber(maxUploadMb, 1)} MB. A larger file is refused before it is sent.</>
+              : <>There is an upload size limit. A larger file is refused with a message that names the limit.</>}
+            {' '}Nothing is stored when a file is refused.
           </p>
         </form>
 

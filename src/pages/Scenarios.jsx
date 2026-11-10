@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { api } from '../api.js'
 import { Chip, ErrorState, Icon, InjectedTag, Loading, PageHead, useAsync, usePageTitle } from '../components/ui.jsx'
-import { fmtDuration } from '../lib.js'
+import { fmtDuration, fmtTimeToDetect } from '../lib.js'
 
 async function loadAll() {
   const [scenarios, validation] = await Promise.allSettled([api.scenarios(), api.validation()])
@@ -23,7 +23,7 @@ function Outcome({ result, gap }) {
       : <Chip tone="sev-high" glyph="✕">Now detected: promote to a scenario</Chip>
   }
   return result.passed && !result.collateral
-    ? <Chip tone="good" glyph="✓">Detected{Number.isFinite(result.time_to_detect_s) ? ` in ${fmtDuration(result.time_to_detect_s)}` : ''}</Chip>
+    ? <Chip tone="good" glyph="✓">Detected{Number.isFinite(result.time_to_detect_s) ? ` in ${fmtTimeToDetect(result.time_to_detect_s)}` : ''}</Chip>
     : <Chip tone="sev-high" glyph="✕">Validation failed</Chip>
 }
 

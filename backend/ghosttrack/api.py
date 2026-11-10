@@ -346,7 +346,8 @@ def _aircraft_out(a: dict, flags: dict[str, list[int]]) -> dict:
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": __version__, "auth_configured": auth.is_configured(),
-            "demo": config.demo_mode(), "guest": config.guest_enabled()}
+            "demo": config.demo_mode(), "guest": config.guest_enabled(),
+            "max_upload_mb": round(config.max_upload_bytes() / (1024 * 1024), 2)}
 
 
 class LoginRequest(BaseModel):
@@ -646,29 +647,11 @@ def upload_recording(_w: Annotated[str, Writer], conn: Conn,
 app.include_router(protected)
 
 
-# API description: for the admin only; the interactive pages are off in demo mode ------------------------------
+# API description: JSON for the admin only. There are no /docs or /redoc pages: they load Swagger UI and ReDoc
+# from a CDN, which the Content-Security-Policy blocks (and a CDN script would defeat the policy).
+# ------------------------------
 
 
 @app.get("/api/openapi.json", include_in_schema=False)
 def openapi_schema(_w: Annotated[str, Writer]):
     return app.openapi()
-
-
-def _docs_page(kind: str):
-    if config.demo_mode():
-        raise HTTPException(404, "Not found")
-    from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
-
-    if kind == "docs":
-        return get_swagger_ui_html(openapi_url="/api/openapi.json", title="GhostTrack API")
-    return get_redoc_html(openapi_url="/api/openapi.json", title="GhostTrack API")
-
-
-@app.get("/docs", include_in_schema=False)
-def docs_page():
-    return _docs_page("docs")
-
-
-@app.get("/redoc", include_in_schema=False)
-def redoc_page():
-    return _docs_page("redoc")

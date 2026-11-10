@@ -814,3 +814,8 @@ input[type="file"] { padding: 8px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* Notice beside admin controls in the hosted demo */
+.demo-notice { display: flex; gap: 6px; align-items: flex-start; margin: 0; color: var(--muted, #9aa7b5); }
+.demo-notice .icon { flex: none; margin-top: 2px; }
+.validated { font-style: italic; }

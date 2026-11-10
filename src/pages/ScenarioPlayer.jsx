@@ -6,7 +6,7 @@ import {
   Chip, ErrorState, Icon, InjectedTag, Loading, PageHead, SeverityChip, usePageTitle, useReducedMotion,
 } from '../components/ui.jsx'
 import { fitBox, viewForBox } from '../geo.js'
-import { aircraftName, fmtDuration, fmtNumber } from '../lib.js'
+import { aircraftName, fmtDuration, fmtNumber, fmtTimeToDetect } from '../lib.js'
 import {
   flaggedAt, frameAircraft, relTime, replayEvents, replayExtent, replayTrails, replayWindow,
 } from '../replay.js'
@@ -72,7 +72,7 @@ function EventItem({ e, fired, current, injectT }) {
       <div className="event-head">
         {fired ? <Chip tone="sev-high" glyph="◎">Fired</Chip> : <Chip glyph="…">Waiting</Chip>}
         <SeverityChip severity={e.severity} />
-        <span className="mono small muted">{relTime(e.fireT, injectT)}</span>
+        <span className="mono small muted">{relTime(e.fireT, injectT)}{e.derived && <span className="validated"> (validated)</span>}</span>
       </div>
       <h3>
         <Link to={`/detections#${e.detection_id}`} className="mono">{e.detection_id}</Link>{' '}
@@ -158,7 +158,7 @@ function Player({ replay, result }) {
         <Controls idx={idx} win={win} playing={playing} speed={speed} reduced={reduced} rel={rel}
           onPlay={togglePlay} onStep={step} onSeek={seek} onRestart={restart} onSpeed={setSpeed} />
         <p className="sr-only" role="status" aria-live="polite">
-          {latest ? `${latest.detection_id} fired at ${relTime(latest.fireT, injectT)}: ${latest.title}.` : ''}
+          {latest ? `${latest.detection_id} fired at ${relTime(latest.fireT, injectT)}${latest.derived ? ' (validated time to detect)' : ''}: ${latest.title}.` : ''}
           {finished ? ' Replay finished.' : ''}
         </p>
         {sel && (
@@ -181,7 +181,7 @@ function Player({ replay, result }) {
               <dd>{sc.expected.length ? sc.expected.map((id) => <Link key={id} to={`/detections#${id}`} className="mono id-pill">{id}</Link>) : <span className="muted">none</span>}</dd>
             </div>
             <div><dt>Injected at</dt><dd className="mono">{relTime(injectT, injectT)} (after {fmtDuration(injectT)} of recorded traffic)</dd></div>
-            {Number.isFinite(ttd) && <div><dt>Validated time to detect</dt><dd>{fmtDuration(ttd)} after injection</dd></div>}
+            {Number.isFinite(ttd) && <div><dt>Validated time to detect</dt><dd>{fmtTimeToDetect(ttd)} after injection</dd></div>}
           </dl>
           <p className="small muted">Source: {sc.reference}</p>
         </section>

@@ -184,7 +184,7 @@ def test_live_switch_defaults_on_in_demo(monkeypatch):
     assert config.live_mode_enabled() is False
 
 
-def test_api_docs_are_off_in_demo_and_openapi_is_writer_only(db_file, monkeypatch):
+def test_api_docs_are_off_everywhere_and_openapi_is_writer_only(db_file, monkeypatch):
     monkeypatch.setenv("GHOSTTRACK_DEMO", "true")
     c = TestClient(app)
     for path in ("/docs", "/redoc"):
@@ -199,7 +199,9 @@ def test_api_docs_are_off_in_demo_and_openapi_is_writer_only(db_file, monkeypatc
 def test_openapi_needs_login_outside_demo(db_file):
     c = TestClient(app)
     assert c.get("/api/openapi.json").status_code == 401
-    assert c.get("/docs").status_code == 200
+    # The CDN-backed Swagger/ReDoc pages are removed outright: the CSP would block their scripts.
+    assert c.get("/docs").status_code == 404
+    assert c.get("/redoc").status_code == 404
 
 
 def test_q_searches_callsign_and_address(demo_client):
@@ -224,3 +226,13 @@ def test_q_wildcards_are_literal_and_safe(demo_client, q):
 
 def test_q_length_is_limited(demo_client):
     assert demo_client.get("/api/alerts", params={"q": "x" * 33}).status_code == 422
+
+
+def test_health_reports_the_upload_limit(monkeypatch):
+    c = TestClient(app)
+    assert c.get("/api/health").json()["max_upload_mb"] == 10
+    monkeypatch.setenv("GHOSTTRACK_MAX_UPLOAD_MB", "2")
+    assert c.get("/api/health").json()["max_upload_mb"] == 2
+    monkeypatch.setenv("GHOSTTRACK_DEMO", "true")
+    monkeypatch.setenv("GHOSTTRACK_MAX_UPLOAD_MB", "50")
+    assert c.get("/api/health").json()["max_upload_mb"] == 4  # the demo is capped

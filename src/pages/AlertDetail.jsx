@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api.js'
 import TrackMini from '../components/TrackMini.jsx'
 import {
-  ErrorState, FormMessage, Icon, Loading, OriginTag, SeverityChip, StatusChip, useAsync, usePageTitle, useSession,
+  DemoNotice, ErrorState, FormMessage, Icon, Loading, OriginTag, SeverityChip, StatusChip, useAsync, usePageTitle, useSession,
 } from '../components/ui.jsx'
 import {
   ATTRIBUTION, INJECTED_NOTICE, STATUS, TRIAGE_OPTIONS, alertSubject, evidenceRows, fmtDateTime, fmtTime,
@@ -78,6 +78,7 @@ function Triage({ alert, onSaved }) {
         <textarea rows={4} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)}
           placeholder="What you checked and what you concluded" />
       </label>
+      <DemoNotice />
       <div className="form-actions">
         <button className="btn primary small" aria-disabled={!dirty || busy ? 'true' : undefined}>
           {busy ? 'Saving…' : 'Save triage'}

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   aircraftName, alertSubject, categoryLabel, evidenceRows, filterAircraft, fmtAgo, fmtAlt, fmtDateTime, fmtTime,
+  fileTooLarge, fmtTimeToDetect, injectedTagText,
   fmtTrack, fmtValue, nextScenario, readStore, sortAircraft, sourceOf, writeStore,
 } from './lib.js'
 
@@ -118,4 +119,27 @@ test('browser storage helpers never throw when storage is missing or blocked', (
   } finally {
     globalThis.window = had
   }
+})
+
+test('injectedTagText shows the API label as given, "Injected" only by default', () => {
+  assert.equal(injectedTagText('Injected test data (as declared by upload)', true), 'Injected test data (as declared by upload)')
+  assert.equal(injectedTagText('Uploaded recording (unverified)', true), 'Uploaded recording (unverified)')
+  assert.equal(injectedTagText(undefined, true), 'Injected')
+  assert.equal(injectedTagText(undefined, false), 'Injected test data')
+  assert.equal(injectedTagText('Injected test data', false), 'Injected test data')
+})
+
+test('fmtTimeToDetect gives the same text for the same value everywhere', () => {
+  assert.equal(fmtTimeToDetect(15), '15 s')
+  assert.equal(fmtTimeToDetect(14.6), '15 s')
+  assert.equal(fmtTimeToDetect(125), '125 s')
+  assert.equal(fmtTimeToDetect(null), '—')
+  assert.equal(fmtTimeToDetect(NaN), '—')
+})
+
+test('fileTooLarge compares against the limit from /api/health', () => {
+  assert.equal(fileTooLarge(5 * 1024 * 1024, 4), true)
+  assert.equal(fileTooLarge(4 * 1024 * 1024, 4), false)
+  assert.equal(fileTooLarge(5 * 1024 * 1024, undefined), false)
+  assert.equal(fileTooLarge(undefined, 4), false)
 })

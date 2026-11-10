@@ -294,6 +294,23 @@ export function nextScenario(scenarios, ts, cycle = DEMO_CYCLE_S) {
   return { scenario: next, inSeconds: Math.round(wait) }
 }
 
+/** Whether a file of `bytes` is over the server's upload limit (`maxMb`, from /api/health); unknown limit: false. */
+export function fileTooLarge(bytes, maxMb) {
+  return Number.isFinite(bytes) && Number.isFinite(maxMb) && bytes > maxMb * 1024 * 1024
+}
+
+/** Text of the injected tag: the API's label as it is when one is given; "Injected" (short) otherwise. */
+export function injectedTagText(label, short) {
+  if (short) return label || 'Injected'
+  return label || INJECTED_LABEL
+}
+
+/** Time to detect, the same text everywhere (player, detections table, scenario cards): whole seconds. */
+export function fmtTimeToDetect(seconds) {
+  if (!Number.isFinite(seconds)) return '—'
+  return `${fmtNumber(Math.round(seconds))} s`
+}
+
 export function fmtDuration(seconds) {
   if (!Number.isFinite(seconds)) return ''
   if (seconds < 90) return `${Math.max(1, Math.round(seconds))} s`

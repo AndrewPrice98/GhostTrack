@@ -26,12 +26,12 @@ export function replayWindow(frames, margin = 3) {
  */
 export function replayEvents(events, { injectT, expected = [], timeToDetect = null } = {}) {
   return (events || [])
-    .map((e) => ({
-      ...e,
-      fireT: expected.includes(e.detection_id) && Number.isFinite(timeToDetect) && Number.isFinite(injectT)
-        ? Math.max(e.t, injectT + timeToDetect)
-        : e.t,
-    }))
+    .map((e) => {
+      const validated = expected.includes(e.detection_id) && Number.isFinite(timeToDetect) && Number.isFinite(injectT)
+      const fireT = validated ? Math.max(e.t, injectT + timeToDetect) : e.t
+      // `derived`: the time comes from the validated time to detect, not from a report in the replay.
+      return { ...e, fireT, derived: validated && fireT !== e.t }
+    })
     .sort((a, b) => a.fireT - b.fireT || String(a.detection_id).localeCompare(String(b.detection_id)))
 }
 

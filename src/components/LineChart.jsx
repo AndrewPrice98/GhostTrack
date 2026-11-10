@@ -105,8 +105,8 @@ export default function LineChart({ title, unit, field, track, bands = [], zero 
               return <rect key={i} className={`chart-band ${b.tone || ''}`} x={x0} y={M.top} width={Math.max(3, x1 - x0)} height={ph} />
             })}
             <path className="chart-line" d={runsPath(runs)} />
-            {showDots && series.map((p) => (
-              <circle key={p.ts} className={`chart-pt${p.injected ? ' injected' : ''}`} cx={sx(p.ts)} cy={sy(p.v)} r={p.injected ? 3.4 : 2.4} />
+            {showDots && series.map((p, i) => (
+              <circle key={`${p.ts}-${i}`} className={`chart-pt${p.injected ? ' injected' : ''}`} cx={sx(p.ts)} cy={sy(p.v)} r={p.injected ? 3.4 : 2.4} />
             ))}
           </g>
           <line className="chart-axis" x1={M.left} x2={M.left} y1={M.top} y2={M.top + ph} />
@@ -138,8 +138,8 @@ export default function LineChart({ title, unit, field, track, bands = [], zero 
             <caption className="sr-only">{title} reports</caption>
             <thead><tr><th scope="col">Time (UTC)</th><th scope="col" className="num">{title} ({unit})</th><th scope="col">Data</th></tr></thead>
             <tbody>
-              {series.map((p) => (
-                <tr key={p.ts}><td>{fmtTime(p.ts)}</td><td className="num">{fmtNumber(p.v)}</td><td>{p.injected ? 'Injected test data' : 'Recorded'}</td></tr>
+              {series.map((p, i) => (
+                <tr key={`${p.ts}-${i}`}><td>{fmtTime(p.ts)}</td><td className="num">{fmtNumber(p.v)}</td><td>{p.injected ? 'Injected test data' : 'Recorded'}</td></tr>
               ))}
             </tbody>
           </table>

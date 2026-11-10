@@ -42,6 +42,7 @@ test('replayEvents fires the expected detection at the validated time to detect'
   ]
   const out = replayEvents(events, { injectT: 120, expected: ['GT-001'], timeToDetect: 15 })
   assert.deepEqual(out.map((e) => [e.detection_id, e.fireT]), [['GT-001', 135], ['GT-004', 140]])
+  assert.deepEqual(out.map((e) => e.derived), [true, false]) // only the validated time is marked
   // without a validated time, or for an unexpected detection, the first flagged report is used
   assert.equal(replayEvents(events, { injectT: 120, expected: ['GT-001'] })[0].fireT, 120)
   // never earlier than the event itself
