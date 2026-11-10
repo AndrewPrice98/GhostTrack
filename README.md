@@ -31,7 +31,7 @@ ADS-B Out is mandatory in much of US airspace: 14 CFR 91.225 requires it in Clas
 Researchers have shown the consequences on bench and lab setups:
 
 - Costin and Francillon (EURECOM) presented practical attacks on ADS-B devices at Black Hat USA 2012, from eavesdropping to message injection and replay. [Whitepaper](https://s3.eurecom.fr/docs/bh12us_costin.pdf); [talk listing](https://infocondb.org/con/black-hat/black-hat-usa-2012/ghost-is-in-the-airtraffic).
-- Schäfer, Lenders and Martinovic, "Experimental Analysis of Attacks on Next Generation Air Traffic Communication", ACNS 2013 (Lecture Notes in Computer Science 7954, pp. 253-271, Springer): an experimental analysis of ADS-B attacks, concluding that safety-critical decisions should not rely on ADS-B alone. [DOI 10.1007/978-3-642-38980-1_16](https://doi.org/10.1007/978-3-642-38980-1_16); [publication record](https://cs.ox.ac.uk/publications/publication8023-abstract.html).
+- Schäfer, Lenders and Martinovic, "Experimental Analysis of Attacks on Next Generation Air Traffic Communication", ACNS 2013 (Lecture Notes in Computer Science 7954, pp. 253-271, Springer): an experimental analysis of attacks on ADS-B (title and keywords only; the abstract was not accessible when this was written). [DOI 10.1007/978-3-642-38980-1_16](https://doi.org/10.1007/978-3-642-38980-1_16); [publication record](https://cs.ox.ac.uk/publications/publication8023-abstract.html).
 - Strohmeier, Lenders and Martinovic, "On the Security of the Automatic Dependent Surveillance-Broadcast Protocol", IEEE Communications Surveys & Tutorials 17(2), 2015, pp. 1066-1087: a survey of the reported attacks and the proposed countermeasures. [DOI 10.1109/COMST.2014.2365951](https://doi.org/10.1109/COMST.2014.2365951); [preprint on arXiv](https://arxiv.org/abs/1307.3664).
 
 Those papers are the reason the seven scenarios exist (ghost injection, flooding, address impersonation, message modification). A single-receiver plausibility layer is the cheapest first filter; the literature also points to multilateration and receiver cross-checks, which GhostTrack does not have (see [Limitations](#honest-limitations)).
@@ -44,6 +44,10 @@ Those papers are the reason the seven scenarios exist (ghost injection, flooding
 4. **Detect.** GT-001 to GT-010 run over every track (GT-009 over the whole fleet). Thresholds live only in `backend/ghosttrack/detections/catalog.yml`.
 5. **Triage.** Findings become alerts with severity, confidence, evidence and benign causes. The admin acknowledges or dismisses them and can export an evidence pack (JSON or standalone HTML) or a summary report.
 6. **Validate.** `python -m ghosttrack validate` injects the scenarios into recorded traffic and measures detections, collateral findings and the false-positive rate. CI fails if a scenario is missed or the budget is exceeded.
+
+![Alerts list: findings with severity, confidence and triage status](docs/screenshots/alerts.png)
+
+![Alert detail: evidence, benign causes and triage controls](docs/screenshots/alert-detail.png)
 
 ## Detections
 

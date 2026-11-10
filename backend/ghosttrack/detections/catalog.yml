@@ -173,7 +173,8 @@ categories:
     rationale: >-
       No category declared (common: about 15 % of records in the committed recordings). Use
       ceilings above any civil transport (ground speed records near 720 kt) but below supersonic
-      flight, which is prohibited for civil aircraft over the US (14 CFR 91.817).
+      flight, which civil aircraft may not fly in the US without a specific authorization
+      (14 CFR 91.817, with authorizations under 91.818).
 
 validation:
   # False-positive budget on the clean committed recordings: findings per hour of recorded
@@ -277,7 +278,8 @@ detections:
       - Velocity derived by MLAT/TIS-B, or a ground speed step when the velocity source changes.
       - Heading/track aliasing when updates are sparse.
     references:
-      - 14 CFR 25.337 (transport category limit load 2.5 g); 14 CFR 23.2200 / CS-23 load factors
+      - 14 CFR 25.337 (limit maneuvering load factors, transport category; positive limit at least 2.5 g, at most 3.8 g, depending on weight)
+      - 14 CFR 23.2200 (design maneuvering load factors in the structural design envelope, normal category)
 
   - id: GT-004
     title: Position jump (teleport)
@@ -393,7 +395,7 @@ detections:
       - Altitude reported in 100 ft steps by older transponders near the band edge.
     references:
       - readsb README-json.md (alt_geom is WGS84 height)
-      - ICAO Doc 8168 Vol I (altimeter temperature error, about 4 % per 10 C)
+      - ICAO Doc 8168 (PANS-OPS), altimeter temperature correction: about 4 % of height per 10 C below standard temperature (volume and chapter differ between editions, so none is cited)
 
   - id: GT-008
     title: Emergency squawk without matching behaviour
@@ -426,7 +428,8 @@ detections:
       - Radio failure (7600) flown exactly as cleared, as the rules require.
       - Squawk briefly passing through an emergency code when changing codes.
     references:
-      - ICAO Doc 4444 / FAA AIM 6-2-2 (emergency transponder codes)
+      - FAA AIM 6-2-2, Transponder Emergency Operation (code 7700)
+      - ICAO Doc 4444 (PANS-ATM) emergency SSR codes 7700 emergency, 7600 radio failure, 7500 unlawful interference (confirmed through SKYbrary, which cites Doc 4444; the ICAO text itself is paywalled)
 
   - id: GT-009
     title: Ghost flood
@@ -465,7 +468,7 @@ detections:
       - A receiver or feeder reconnecting to the aggregator, so many aircraft reappear at once (they rarely share a velocity).
     references:
       - Costin and Francillon, "Ghost in the Air(Traffic)", Black Hat USA 2012
-      - Schafer et al., "Experimental Analysis of Attacks on Next Generation Air Traffic Communication", ACNS 2013
+      - Schäfer, Lenders and Martinovic, "Experimental Analysis of Attacks on Next Generation Air Traffic Communication", ACNS 2013 (LNCS 7954, pp. 253-271, doi 10.1007/978-3-642-38980-1_16)
 
   - id: GT-010
     title: Integrity indicators drop to zero
@@ -487,4 +490,5 @@ detections:
       - Avionics switching navigation source, or loss of satellite geometry.
     references:
       - readsb README-json.md (nic, nac_p)
-      - FAA AC 20-165B (NIC/NACp meaning)
+      - 14 CFR 91.227 (defines NIC and NACp and sets the ADS-B Out performance requirements)
+      - FAA AC 20-165B (airworthiness approval of ADS-B Out systems)

@@ -16,8 +16,8 @@ Every scenario is deterministic: the only randomness is a ``random.Random(seed)`
 References (public research on ADS-B insecurity; GhostTrack reimplements none of the attacks):
   - Costin and Francillon, "Ghost in the Air (Traffic): On insecurity of ADS-B protocol and
     practical attacks on ADS-B devices", Black Hat USA 2012.
-  - Schaefer, Lenders and Martinovic, "Experimental Analysis of Attacks on Next Generation Air
-    Traffic Communication", ACNS 2013 (message injection, modification and deletion).
+  - Schäfer, Lenders and Martinovic, "Experimental Analysis of Attacks on Next Generation Air
+    Traffic Communication", ACNS 2013 (experimental analysis of attacks on ADS-B).
   - Strohmeier, Lenders and Martinovic, "On the Security of the Automatic Dependent
     Surveillance-Broadcast Protocol", IEEE Communications Surveys & Tutorials 17(2), 2015.
   - Humphreys, Ledvina, Psiaki, O'Hanlon and Kintner, "Assessing the Spoofing Threat:
@@ -308,7 +308,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         "single_ghost", "Single ghost aircraft",
         "One fabricated airliner that looks ordinary (category A3, squawk 1200, NIC 8) but reports "
         "a 1,350 kt ground speed, with positions that move consistently at that speed.",
-        "Ghost aircraft injection: Costin and Francillon, Black Hat USA 2012; Schaefer et al., ACNS 2013.",
+        "Ghost aircraft injection: Costin and Francillon, Black Hat USA 2012; Schäfer et al., ACNS 2013.",
         ("GT-001",), _single_ghost, seed=1001,
     ),
     Scenario(
@@ -332,7 +332,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         "A real, recorded aircraft's reported position steps 20 NM sideways in a single report and "
         "stays shifted, as if its messages had been modified in transit. This is a step, not a "
         "gradual drag-off: it is caught at the instant of the jump (see the gradual_drift gap).",
-        "Message modification: Schaefer et al., ACNS 2013. GNSS spoofing of position sources: "
+        "Message modification (attack background: Schäfer et al., ACNS 2013). GNSS spoofing of position sources: "
         "Humphreys et al., ION GNSS 2008.",
         ("GT-004",), _position_offset, seed=1004,
     ),
@@ -340,7 +340,7 @@ SCENARIOS: tuple[Scenario, ...] = (
         "teleport", "Teleport (150 NM jump)",
         "A fabricated aircraft flies a smooth track, then its next report is 150 NM away and it "
         "continues from there.",
-        "Position modification and injection: Schaefer et al., ACNS 2013.",
+        "Position injection (attack background: Schäfer et al., ACNS 2013).",
         ("GT-004",), _teleport, seed=1005,
     ),
     Scenario(
