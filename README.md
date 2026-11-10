@@ -4,7 +4,7 @@
 
 > **GhostTrack is a portfolio project, not a certified surveillance system.** It does not replace air traffic control, a multilateration network or any safety-of-flight tool. Everything it flags has benign explanations that the UI lists next to the finding.
 
-**Live demo: <https://ghosttrack.vercel.app/>** (placeholder: the deployment is done separately by the owner, so this link may not resolve yet). The hosted demo is read-only for visitors and replays recorded traffic with injected test scenarios.
+**Live demo: <https://ghosttrack-demo.vercel.app/>**. The hosted demo is read-only for visitors and replays recorded traffic with injected test scenarios.
 
 ![Live map: recorded traffic around LAX with the aircraft list and the next injected scenario](docs/screenshots/live-map.png)
 
