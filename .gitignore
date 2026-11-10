@@ -1,0 +1,17 @@
+
+# Python backend
+*.db
+*.db-shm
+*.db-wal
+*.local
+*.pyc
+*.sqlite
+.coverage
+.env
+.pytest_cache/
+.venv/
+.vercel/
+__pycache__/
+backend/.venv/
+dist
+node_modules
