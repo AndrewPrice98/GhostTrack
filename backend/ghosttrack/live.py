@@ -29,6 +29,8 @@ log = logging.getLogger("ghosttrack.live")
 CACHE_CONTROL = "s-maxage=10, stale-while-revalidate=30"
 FALLBACK_NOTICE = "Live feed unavailable; showing recorded traffic"
 STORAGE_NOTICE = "Storage unavailable; showing recorded traffic"
+LOADING_NOTICE = "Loading live data; showing recorded traffic"
+MAX_UPSTREAM_SKEW_S = 300.0  # an upstream "now" further than this from our clock is not trusted
 MODES = ("recorded", "live")
 STALE_WHILE_REVALIDATE_S = 30.0  # matches the stale-while-revalidate in CACHE_CONTROL
 
@@ -40,11 +42,13 @@ def response_headers() -> dict[str, str]:
 
 @dataclass(frozen=True)
 class LiveResult:
-    snapshot: Snapshot | None  # None: the upstream is unavailable
-    fetched_at: float | None
+    snapshot: Snapshot | None  # None: no usable live picture
+    fetched_mono: float | None  # monotonic time of the fetch (an internal reference, not an epoch)
     from_cache: bool
     error: str | None = None
     stale: bool = False  # an older good snapshot served inside the stale-while-revalidate window
+    age_s: float = 0.0  # seconds since that snapshot was fetched
+    loading: bool = False  # nothing fetched yet and another request is fetching it
 
 
 class LiveFeed:
@@ -83,12 +87,12 @@ class LiveFeed:
         err = self._error.get(region)
         cached = self._cache.get(region)
         if cached is not None:
-            age = now - cached[1]
+            age = max(0.0, now - cached[1])
             if err is None:
-                return LiveResult(cached[0], cached[1], not fetched_now)
+                return LiveResult(cached[0], cached[1], not fetched_now, age_s=age)
             if age <= STALE_WHILE_REVALIDATE_S:  # the last good picture is still fresh enough
-                return LiveResult(cached[0], cached[1], True, err, stale=True)
-        return LiveResult(None, None, not fetched_now, err or "no data yet")
+                return LiveResult(cached[0], cached[1], True, err, stale=True, age_s=age)
+        return LiveResult(None, None, not fetched_now, err or "no data yet", loading=err is None)
 
     def current(self, region: str = demo.REGION) -> LiveResult:
         if region not in upstream.REGIONS:
@@ -113,12 +117,22 @@ class LiveFeed:
                         log.exception("Unexpected live fetch failure")
                     self._error[region] = f"{type(exc).__name__}: {exc}"
                 else:
+                    snap = self._trusted(snap)
                     self._cache[region] = (snap, now)
                     self._error[region] = None
                     self._store(region, snap)
             return self._serve(region, now, fetched_now)
         finally:
             self._lock.release()
+
+    def _trusted(self, snap: Snapshot) -> Snapshot:
+        """The upstream clock is untrusted input: a snapshot whose time is far from ours is
+        stored and shown with our receipt time instead."""
+        local = self.clock()
+        if abs(snap.ts - local) > MAX_UPSTREAM_SKEW_S:
+            log.warning("Upstream time %.0f is %.0f s from the local clock; using receipt time", snap.ts, snap.ts - local)
+            return Snapshot(local, snap.aircraft)
+        return snap
 
     def _store(self, region: str, snap: Snapshot) -> None:
         """Persist the snapshot, detect and upsert. Storage trouble never hides live data."""
@@ -127,7 +141,7 @@ class LiveFeed:
             try:
                 db.store_snapshot(conn, "live", region, snap)
                 pipeline.detect_window(conn, "live", region, snap.ts)
-                db.prune(conn, snap.ts)  # same time base as the window itself
+                db.prune(conn, min(snap.ts, self.clock()))  # never ahead of the local clock
             finally:
                 conn.close()
         except Exception:  # sqlite3.Error or a detection bug: the picture is still good
@@ -137,11 +151,14 @@ class LiveFeed:
 def traffic_view(
     conn, mode: str = "recorded", region: str = demo.REGION, *, feed: LiveFeed | None = None, now_ts: float | None = None
 ) -> dict:
-    """The traffic picture for one request.
+    """The traffic picture for one request, on an open connection (``None`` means no database).
 
     ``mode="recorded"`` (the default) is the clock-aligned replay. ``mode="live"`` is the adsb.lol
-    view (throttled and cached) with the replay's injected aircraft overlaid; if the upstream is
-    unavailable the result is the replay with ``source: "recorded"`` and a notice.
+    view (throttled and cached) with the replay's injected aircraft overlaid. If the upstream is
+    unavailable the result is the replay with ``source: "recorded"`` and a notice; if the
+    database is unusable the replay comes straight from the in-memory cycle.
+
+    The API layer should call ``get_traffic``, which also covers failing to open the database.
     """
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}")
@@ -149,12 +166,14 @@ def traffic_view(
         now_ts = feed.clock() if feed is not None else time.time()
     notice = None
     try:
+        if conn is None:
+            raise sqlite3.OperationalError("no database connection")
         demo.catch_up(conn, now_ts, region=region)
         replay = demo.recorded_snapshot(conn, now_ts, region)
-    except sqlite3.Error:
+    except (sqlite3.Error, OSError):
         # The database is unusable (read-only or missing /tmp, locked, corrupt): the replay is a
         # pure function of the clock, so serve it straight from the in-memory cycle.
-        log.exception("Database unavailable; serving the replay from memory")
+        log.warning("Database unavailable; serving the replay from memory", exc_info=conn is not None)
         replay = demo.cycle_snapshot_at(now_ts)
         notice = STORAGE_NOTICE
     replay_aircraft = replay.aircraft if replay else []
@@ -165,13 +184,13 @@ def traffic_view(
         result = (feed or default_feed()).current(region)
         if result.snapshot is not None:
             source = "live"
-            notice = None  # the live picture is fine even if the replay overlay came from memory
+            notice = f"Showing live data from {int(result.age_s)} s ago" if result.stale else None
             ts = result.snapshot.ts
             live_icaos = {a.icao for a in result.snapshot.aircraft}
             aircraft = [a.to_dict() for a in result.snapshot.aircraft]
             aircraft += [a.to_dict() for a in replay_aircraft if a.injected and a.icao not in live_icaos]
         else:
-            notice = FALLBACK_NOTICE
+            notice = LOADING_NOTICE if result.loading else FALLBACK_NOTICE
     return {
         "source": source,
         "notice": notice,
@@ -182,6 +201,32 @@ def traffic_view(
         "injected_aircraft": sum(1 for a in aircraft if a["injected"]),
         "headers": response_headers(),
     }
+
+
+def get_traffic(
+    mode: str = "recorded",
+    region: str = demo.REGION,
+    *,
+    connect: Callable[[], Any] = db.connect,
+    feed: LiveFeed | None = None,
+    now_ts: float | None = None,
+) -> dict:
+    """The entry point for the API layer: opens (and closes) the database itself, so a failure to
+    open it (unwritable path, missing directory, locked file) also falls back to the in-memory
+    replay with a notice instead of an error."""
+    try:
+        conn = connect()
+    except (sqlite3.Error, OSError):
+        log.warning("Could not open the database; serving the replay from memory", exc_info=True)
+        conn = None
+    try:
+        return traffic_view(conn, mode, region, feed=feed, now_ts=now_ts)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
 
 
 _default_feed: LiveFeed | None = None

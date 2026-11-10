@@ -84,7 +84,11 @@ def test_catch_up_throttle_starts_only_after_success(conn, monkeypatch):
         demo.catch_up(conn, HOUR + 500.0, throttle_seconds=60)
     assert demo._last_run == {}  # a failed catch-up does not start the throttle
     monkeypatch.undo()
-    # The throttle is per region.
+    # After a failure retries are held back for a few seconds (a failing database is not hammered)...
+    assert demo.catch_up(conn, HOUR + 500.0, throttle_seconds=60) == 0
+    assert demo._last_run == {}
+    # ...and allowed again afterwards. The throttle is per region.
+    demo._last_fail["socal"] -= demo.RETRY_AFTER_FAILURE_S + 1
     demo.catch_up(conn, HOUR + 500.0, throttle_seconds=60)
     demo.catch_up(conn, HOUR + 500.0, region="elsewhere", throttle_seconds=60)
     assert set(demo._last_run) == {"socal", "elsewhere"}
@@ -159,7 +163,7 @@ def test_last_good_picture_is_served_within_stale_while_revalidate(conn, feed_en
     r = feed.current("socal")
     assert r.snapshot is not None and r.stale and fake.calls == 2
     view = live.traffic_view(conn, "live", feed=feed)
-    assert view["source"] == "live" and view["notice"] is None
+    assert view["source"] == "live" and view["notice"] == "Showing live data from 10 s ago"
     clock.t += 25  # 35.5 s after the good fetch: beyond the stale window
     r = feed.current("socal")
     assert r.snapshot is None
@@ -222,11 +226,17 @@ def test_a_clean_live_feed_raises_no_medium_alerts(db_file):
     """Cold start on the clean recording through the live path: nothing at medium or above."""
     clean = load_recording(RECORDINGS_DIR / DEFAULT_RECORDING)
     seq = iter(clean[:120])
-    clock = Clock()
-    feed = live.LiveFeed(fetch=lambda region: (next(seq), {}), clock=clock)
+    wall, mono = Clock(clean[:120][0].ts), Clock(0.0)  # the wall clock follows the data, the throttle clock ticks 10 s
+
+    def fetch(region):
+        snap = next(seq)
+        wall.t = snap.ts
+        return snap, {}
+
+    feed = live.LiveFeed(fetch=fetch, clock=wall, monotonic=mono)
     for _ in range(120):
         assert feed.current("socal").snapshot is not None
-        clock.t += 10.0
+        mono.t += 10.0
     c = db.connect(db_file)
     assert [a for a in db.list_alerts(c) if a["severity"] in ("medium", "high")] == []
     c.close()

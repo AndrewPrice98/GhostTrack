@@ -56,6 +56,10 @@ SCHEDULE: tuple[tuple[str, float], ...] = (
 _lock = threading.Lock()  # one catch-up at a time per process
 _seed_lock = threading.Lock()
 _last_run: dict[str, float] = {}  # region -> time.monotonic() of its last successful catch-up
+_last_fail: dict[str, float] = {}  # region -> time.monotonic() of its last failed catch-up
+_last_fail_log: dict[str, float] = {}
+RETRY_AFTER_FAILURE_S = 5.0  # a failing database is not hammered on every request
+FAILURE_LOG_WINDOW_S = 60.0  # ... and its error is logged once per window
 
 
 # ------------------------------------------------------------------ the cycle
@@ -125,7 +129,7 @@ def build_fixture() -> dict:
     snaps = cycle_snapshots()
     rows = alert_rows(analyse(snaps), "recorded")
     for row in rows:
-        row["detected_at"] = _detected_at(snaps, row)
+        row["detected_at"], row["initial"] = _detected_at(snaps, row)
     return _round({
         "version": FIXTURE_VERSION,
         "inputs_digest": inputs_digest(),
@@ -141,9 +145,14 @@ DETECT_LOOKBACK_S = 400.0  # history given to the prefix replay (longer than GT-
 DETECT_MATCH_S = 120.0  # a prefix finding is the template's episode when its start is this close
 
 
-def _detected_at(snaps, row: dict) -> float:
+INITIAL_FIELDS = ("severity", "confidence", "explanation", "benign_causes", "evidence")
+
+
+def _detected_at(snaps, row: dict) -> tuple[float, dict | None]:
     """Cycle offset of the first snapshot at which a replay of the data so far already raises
-    this alert (the same prefix replay and binary search as ``validate._time_to_detect``).
+    this alert (the same prefix replay and binary search as ``validate._time_to_detect``), and
+    the alert as it looked at that moment: severity, confidence, explanation and evidence
+    computed from the data observed by then (``None`` when it cannot be reproduced on a prefix).
     The replay starts ``DETECT_LOOKBACK_S`` before the episode, which keeps it fast."""
     from ghosttrack.detections import analyse
 
@@ -152,22 +161,24 @@ def _detected_at(snaps, row: dict) -> float:
     lo = max(start, bisect.bisect_left(offs, row["first_ts"]))
     hi = min(bisect.bisect_left(offs, row["last_ts"]), len(snaps) - 1)
 
-    def fired(i: int) -> bool:
-        return any(
-            f.detection_id == row["detection_id"] and f.icao == row["icao"]
-            and abs(f.ts_first - row["first_ts"]) <= DETECT_MATCH_S
-            for f in analyse(snaps[start : i + 1]).findings
-        )
+    def match(i: int) -> dict | None:
+        for r in alert_rows(analyse(snaps[start : i + 1]), "recorded"):
+            if (r["detection_id"] == row["detection_id"] and r["icao"] == row["icao"]
+                    and abs(r["first_ts"] - row["first_ts"]) <= DETECT_MATCH_S):
+                return r
+        return None
 
-    if hi < lo or not fired(hi):
-        return row["last_ts"]  # not reproducible on a prefix: fall back to the episode end
+    if hi < lo or match(hi) is None:
+        return row["last_ts"], None  # not reproducible on a prefix: fall back to the episode end
     while lo < hi:
         mid = (lo + hi) // 2
-        if fired(mid):
+        if match(mid) is not None:
             hi = mid
         else:
             lo = mid + 1
-    return max(row["first_ts"], offs[lo])
+    found = match(lo)
+    initial = {k: found[k] for k in INITIAL_FIELDS}
+    return max(row["first_ts"], offs[lo]), initial
 
 
 def fixture_json(fixture: dict) -> str:
@@ -191,14 +202,25 @@ def load_templates() -> tuple[dict, ...]:
 
 
 def stamp_alert(template: dict, cycle_start: float, now_ts: float | None = None) -> dict:
-    """The template on the wall clock. With ``now_ts`` only what has happened by then is kept:
-    last_ts is clipped to now and later evidence is left out (a later catch-up extends it)."""
-    row = {k: v for k, v in template.items() if k != "detected_at"}
+    """The template on the wall clock, as it would have been known at ``now_ts``.
+
+    Before the episode ends the alert is the detection-time version (the template's ``initial``
+    severity, confidence, explanation and evidence, computed from the data seen by then), with
+    ``last_ts`` clipped to now and no evidence from the future. At or after the end it is the
+    final version. Without ``now_ts`` the final version is returned.
+    """
+    skip = ("detected_at", "initial")
+    row = {k: v for k, v in template.items() if k not in skip}
     row["first_ts"] = template["first_ts"] + cycle_start
     row["last_ts"] = template["last_ts"] + cycle_start
     row["evidence"] = [{**e, "ts": e["ts"] + cycle_start} for e in template["evidence"]]
-    if now_ts is not None:
-        row["last_ts"] = min(row["last_ts"], now_ts)
+    if now_ts is not None and now_ts < row["last_ts"]:
+        initial = template.get("initial")
+        if initial:
+            for k in INITIAL_FIELDS:
+                row[k] = initial[k]
+            row["evidence"] = [{**e, "ts": e["ts"] + cycle_start} for e in initial["evidence"]]
+        row["last_ts"] = now_ts
         row["evidence"] = [e for e in row["evidence"] if e["ts"] <= now_ts]
     return row
 
@@ -262,15 +284,23 @@ def catch_up(
         last = _last_run.get(region)
         if throttle_seconds and last is not None and mono - last < throttle_seconds:
             return 0
+        failed = _last_fail.get(region)
+        if throttle_seconds and failed is not None and mono - failed < RETRY_AFTER_FAILURE_S:
+            return 0
         conn.commit()  # no transaction may be open when taking the write lock
         conn.execute("BEGIN IMMEDIATE")
         try:
             stored = _stamp(conn, now_ts, region)
             conn.commit()
-        except BaseException:
+        except BaseException as exc:
             conn.rollback()
+            _last_fail[region] = mono
+            if mono - _last_fail_log.get(region, -FAILURE_LOG_WINDOW_S) >= FAILURE_LOG_WINDOW_S:
+                _last_fail_log[region] = mono
+                log.error("Demo catch-up failed (%s: %s); retrying in %.0f s", type(exc).__name__, exc, RETRY_AFTER_FAILURE_S)
             raise
         _last_run[region] = mono  # only a successful catch-up starts the throttle
+        _last_fail.pop(region, None)
         return stored
 
 

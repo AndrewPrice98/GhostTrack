@@ -189,11 +189,17 @@ def test_each_fetch_runs_detection_and_never_duplicates_alerts(db_file):
     run = scenario_by_id("single_ghost").apply(clean)
     frames = [s for s in run.snapshots if s.ts >= run.inject_ts - 60][:30]
     seq = iter(frames)
-    clock = Clock()
-    feed = live.LiveFeed(fetch=lambda region: (next(seq), {}), clock=clock)
+    wall, mono = Clock(frames[0].ts), Clock(0.0)  # the wall clock follows the data, the throttle clock ticks 10 s
+
+    def fetch(region):
+        snap = next(seq)
+        wall.t = snap.ts
+        return snap, {}
+
+    feed = live.LiveFeed(fetch=fetch, clock=wall, monotonic=mono)
     for _ in range(len(frames)):
         assert feed.current("socal").snapshot is not None
-        clock.t += 10.0
+        mono.t += 10.0
     c = db.connect(db_file)
     alerts = db.list_alerts(c, sources=["live"])
     keys = [(a["detection_id"], a["icao"]) for a in alerts]
