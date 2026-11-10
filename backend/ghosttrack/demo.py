@@ -37,6 +37,9 @@ log = logging.getLogger("ghosttrack.demo")
 
 REGION = "socal"
 CYCLE_S = 3600.0
+# The replay cycle is one hour of contiguous overnight recordings. Later recordings (daytime, hours apart)
+# only feed validation and the false-positive budget, so they are not part of the cycle.
+DEMO_RECORDINGS = ("socal-a.jsonl.gz", "socal-b.jsonl.gz", "socal-c.jsonl.gz")
 FIXTURE_VERSION = 1
 DEFAULT_THROTTLE_SECONDS = 5.0
 
@@ -65,11 +68,15 @@ FAILURE_LOG_WINDOW_S = 60.0  # ... and its error is logged once per window
 # ------------------------------------------------------------------ the cycle
 
 
+def _demo_recordings() -> list:
+    return [p for p in manifest_recordings(config.RECORDINGS_DIR) if p.name in DEMO_RECORDINGS]
+
+
 @lru_cache(maxsize=1)
 def _recorded_cycle() -> tuple[Snapshot, ...]:
     """The recordings concatenated in manifest order, re-timed to start at offset 0."""
     snaps: list[Snapshot] = []
-    for path in manifest_recordings(config.RECORDINGS_DIR):
+    for path in _demo_recordings():
         snaps.extend(load_recording(path))
     snaps.sort(key=lambda s: s.ts)
     t0 = snaps[0].ts
@@ -101,7 +108,7 @@ def inputs_digest() -> str:
     """Digest of everything the fixture depends on besides code (the offline check covers code)."""
     h = hashlib.sha256()
     h.update(f"v{FIXTURE_VERSION}".encode())
-    for path in manifest_recordings(config.RECORDINGS_DIR):
+    for path in _demo_recordings():
         h.update(path.name.encode())
         h.update(hashlib.sha256(path.read_bytes()).digest())
     h.update(b"\n".join(CATALOG_PATH.read_bytes().splitlines()))  # same digest on CRLF checkouts

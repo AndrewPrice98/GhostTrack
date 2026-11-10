@@ -38,7 +38,7 @@ Those papers are the reason the seven scenarios exist (ghost injection, flooding
 
 ## The workflow
 
-1. **Ingest.** The backend fetches civil aircraft inside 60 NM of LAX from adsb.lol (live mode), or replays three committed recordings (demo mode).
+1. **Ingest.** The backend fetches civil aircraft inside 60 NM of LAX from adsb.lol (live mode), or replays three committed overnight recordings (demo mode; two further daytime recordings feed validation only).
 2. **Sanitise.** Every record is validated: bad addresses, out-of-range positions and duplicates are dropped and counted; military aircraft are excluded.
 3. **Track.** Aircraft are tracked by ICAO address, using the true position time (not the poll time), so a late or repeated report cannot fake a jump.
 4. **Detect.** GT-001 to GT-010 run over every track (GT-009 over the whole fleet). Thresholds live only in `backend/ghosttrack/detections/catalog.yml`.
@@ -99,6 +99,8 @@ recording             hours  tracks  counted  per hour  findings by detection/se
 socal-a.jsonl.gz       0.33      60        0      0.00  none
 socal-b.jsonl.gz       0.33      54        0      0.00  none
 socal-c.jsonl.gz       0.33      48        0      0.00  none
+socal-d.jsonl.gz       0.33     275        0      0.00  GT-010/low=31
+socal-e.jsonl.gz       0.33     326        0      0.00  GT-010/low=83
 ```
 <!-- validate:end -->
 
@@ -106,9 +108,9 @@ How to read it:
 
 - **Time to detect** is measured at snapshot granularity (about 5-6 s in the recordings, 10 s live); 0 means detected on the first injected report.
 - **`gradual_drift` is a known gap.** A real track dragged 0.1 NM per poll stays inside every kinematic limit, so single-receiver plausibility checks cannot see it. If a future change makes it fire, validation reports `GAP CLOSED` and fails until the scenario is promoted.
-- **False-positive budget.** Only findings of severity medium or high count. The budget is the larger of 1.0 per hour and 1.5 times the measured rate, so with zero findings it sits at the 1.0/h floor.
+- **False-positive budget.** Only findings of severity medium or high count. The budget is the larger of 1.0 per hour and 1.5 times the measured rate. Across all five recordings the counted rate is 0 per hour, so it still sits at the 1.0/h floor. The daytime recordings do produce low-severity GT-010 findings (listed in the table, not budgeted; see DECISIONS.md).
 
-**The baseline is thin.** The measurement comes from three contiguous 20-minute recordings taken overnight (00:39-01:39 Pacific, light traffic, 48-60 aircraft each), about one hour in total. A rate of 0 per hour on that data says little about busy daytime traffic. Two daytime recordings will be added and the numbers above will change; until then the 1.0/h budget is a placeholder floor, not an earned figure.
+**The baseline is still thin.** The measurement comes from five 20-minute recordings, about 1.7 hours in total: three overnight (00:39-01:39 Pacific, light traffic, 48-60 aircraft each) and two taken on 2026-11-10 at 16:00-16:41 UTC (08:00-08:41 Pacific, 275 and 326 aircraft). Both daytime recordings are from the same morning, one region and a single day, so the 1.0/h budget is still the floor, not an earned figure. One counted finding in a 20-minute recording is 3 per hour.
 
 ![A scenario replay: a fabricated aircraft at 1,350 kt, with the detections firing and their validated times](docs/screenshots/scenario-player.png)
 
@@ -214,7 +216,7 @@ CI (`.github/workflows/ci.yml`) runs on every push and pull request: backend tes
 - **A consistent, slow attack is invisible.** `gradual_drift` (a track dragged inside every kinematic limit) is a documented gap, as above.
 - **Benign causes are real.** GNSS interference, receiver or decoder errors, address re-use, database errors in registrations and unconverged GNSS height all trigger the same checks. That is why every finding lists benign causes and why severity is not the same as certainty.
 - **Military exclusion is best effort.** The point endpoint did not deliver `dbFlags` in the live sample, so aircraft are dropped on the flag when present or on the US DoD address block `AE0000-AFFFFF`. Other military traffic may appear.
-- **Thin false-positive baseline.** One hour of overnight data, as above. Two daytime recordings are planned.
+- **Thin false-positive baseline.** Five recordings (about 1.7 hours): three overnight and two from one weekday morning. No other days, weekends or evening peaks.
 - **Scenarios are synthetic.** They show the checks working on the attacks they were written for; they are not evidence about attacks in the wild.
 
 ## Licence

@@ -488,6 +488,7 @@ detections:
     benign_causes:
       - GNSS interference (jamming tests, NOTAMed GPS testing), which is real but not spoofing of ADS-B.
       - Avionics switching navigation source, or loss of satellite geometry.
+      - A transmitter alternating NIC/NACp 0 and a healthy value from report to report (daytime recordings, mostly category A1 light aircraft; most recover within 60 s), or TIS-B-sourced reports, which carry no real integrity of the aircraft's own navigation source. Seen only in the daytime recordings, always severity low and therefore not budgeted.
     references:
       - readsb README-json.md (nic, nac_p)
       - 14 CFR 91.227 (defines NIC and NACp and sets the ADS-B Out performance requirements)

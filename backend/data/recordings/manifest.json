@@ -22,5 +22,21 @@
     "snapshots": 200,
     "aircraft": 48,
     "sha256": "ca67e36da3912eab810a79bc14db7ddfd2cbc866813499990ef2b2331d707ae8"
+  },
+  {
+    "name": "socal-d.jsonl.gz",
+    "start_utc": "2026-11-10T16:00:33Z",
+    "end_utc": "2026-11-10T16:20:23Z",
+    "snapshots": 116,
+    "aircraft": 275,
+    "sha256": "bc26ee595ff3a7c3d57e005f49a338629e6c7122ef0d9851a841f945b2f00798"
+  },
+  {
+    "name": "socal-e.jsonl.gz",
+    "start_utc": "2026-11-10T16:20:48Z",
+    "end_utc": "2026-11-10T16:40:38Z",
+    "snapshots": 116,
+    "aircraft": 326,
+    "sha256": "6143e38b9e6f711ea1699709b423b07ff6462aed928b549b3fa01c087945ba7c"
   }
 ]
