@@ -6,7 +6,7 @@
 
 **Live demo: <https://ghosttrack-demo.vercel.app/>**. The hosted demo is read-only for visitors and replays recorded traffic with injected test scenarios.
 
-![Live map: recorded traffic around LAX with the aircraft list and the next injected scenario](docs/screenshots/live-map.png)
+![Live map: recorded traffic around LAX with the aircraft list and a flagged injected aircraft](docs/screenshots/live-map.png)
 
 ## What GhostTrack does and doesn't do
 
@@ -195,7 +195,7 @@ flowchart LR
 
 - **SSRF prevention.** The only outbound host is `api.adsb.lol`, a constant in the code and never taken from input. The request path is built from numbers only (latitude, longitude and radius from an allow-listed region table), the opener refuses every redirect and ignores proxy environment variables, HTTPS is enforced, bodies over 5 MB are refused, and the timeout is 3 s. There is no route that fetches a user-supplied URL.
 - **Content Security Policy and headers.** `default-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'` and friends, on both the API and the static site. `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, strict referrer policy and `Cache-Control: no-store` (except the live route). Downloaded HTML is sandboxed with its own CSP. Because the CSP blocks CDN scripts, the Swagger UI and ReDoc pages are not served at all; the OpenAPI JSON is available to the admin at `/api/openapi.json`.
-- **No external tiles or fonts.** The map is hand-drawn SVG from a bundled Natural Earth outline, so no third party sees what you look at, and the CSP allows no other origin.
+- **No external tiles or fonts.** The map is hand-drawn SVG from a bundled Natural Earth outline and the typeface is bundled with the build, so no third party sees what you look at, and the CSP allows no other origin.
 - **Authentication.** PBKDF2-SHA256 (600,000 iterations) password hashing, a signed JWT with a pinned algorithm in an httpOnly, SameSite=Strict cookie that never appears in a response body, a per-IP login limiter, fail-closed when unconfigured. Guests exist only in demo mode and can never write.
 - **Untrusted input.** Every filter is allow-listed or validated, SQL is parameterized, request bodies are capped (64 KiB, or the upload cap for recordings), uploads are size- and decompression-limited and labelled "Uploaded recording (unverified)", and the upstream clock is not trusted.
 - **Supply chain.** CI runs `pip-audit`, `npm audit` (high) and gitleaks; Dependabot is enabled.
