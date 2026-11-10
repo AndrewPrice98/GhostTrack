@@ -1,0 +1,26 @@
+[
+  {
+    "name": "socal-a.jsonl.gz",
+    "start_utc": "2026-11-10T08:39:47Z",
+    "end_utc": "2026-11-10T08:59:42Z",
+    "snapshots": 202,
+    "aircraft": 60,
+    "sha256": "a5cc952b7bbd5572a2a6c1670ca9933198887cfb8763e23743dda3acde05b828"
+  },
+  {
+    "name": "socal-b.jsonl.gz",
+    "start_utc": "2026-11-10T08:59:48Z",
+    "end_utc": "2026-11-10T09:19:43Z",
+    "snapshots": 200,
+    "aircraft": 54,
+    "sha256": "7124fa08bb701d51df4209e15fc0431c3c581eb7e3b2c9aed147d67c94d82a24"
+  },
+  {
+    "name": "socal-c.jsonl.gz",
+    "start_utc": "2026-11-10T09:19:48Z",
+    "end_utc": "2026-11-10T09:39:43Z",
+    "snapshots": 200,
+    "aircraft": 48,
+    "sha256": "ca67e36da3912eab810a79bc14db7ddfd2cbc866813499990ef2b2331d707ae8"
+  }
+]
