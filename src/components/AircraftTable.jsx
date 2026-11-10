@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import {
   AIRCRAFT_SORTS, SOURCES, aircraftName, filterAircraft, fmtAlt, fmtNumber, fmtTrack, plural, sortAircraft, sourceOf,
 } from '../lib.js'
-import { Chip, InjectedTag } from './ui.jsx'
+import { Chip, Icon, InjectedTag } from './ui.jsx'
 
 const COLUMNS = [
   ['name', 'Aircraft', 'name-col'],
@@ -31,10 +31,12 @@ export default function AircraftTable({ aircraft, selected, onSelect }) {
   }
 
   return (
-    <section className="ac-list card flush" aria-labelledby="ac-list-title">
+    <section className="ac-list panel" aria-labelledby="ac-list-title">
       <div className="ac-list-head">
-        <h2 id="ac-list-title">Aircraft list</h2>
-        <p className="muted small">{plural(aircraft.length, 'aircraft', 'aircraft')} · {plural(flagged, 'flagged', 'flagged')} · flagged listed first</p>
+        <div className="ac-list-title">
+          <h2 id="ac-list-title">Aircraft list</h2>
+          <p className="muted small">{plural(aircraft.length, 'aircraft', 'aircraft')} · {plural(flagged, 'flagged', 'flagged')}</p>
+        </div>
         <div className="ac-list-filters">
           <label className="field compact grow">
             <span className="sr-only">Search callsign or hex</span>
@@ -59,7 +61,7 @@ export default function AircraftTable({ aircraft, selected, onSelect }) {
                   aria-sort={sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
                   <button type="button" className="sort-btn" onClick={() => toggle(key)}>
                     {label}
-                    <span className="sort-ind" aria-hidden="true">{sort.key === key ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+                    <span className="sort-ind" aria-hidden="true">{sort.key === key && <Icon name={sort.dir === 'asc' ? 'up' : 'down'} size={12} />}</span>
                   </button>
                 </th>
               ))}
@@ -74,11 +76,11 @@ export default function AircraftTable({ aircraft, selected, onSelect }) {
                   <th scope="row" className="name-col">
                     <button type="button" className="ac-select" aria-pressed={isSel} onClick={() => onSelect(isSel ? null : a.icao)}>
                       <span className="ac-name">{aircraftName(a)}</span>
-                      <span className="ac-hex mono">{a.icao.toUpperCase()}</span>
+                      {aircraftName(a) !== a.icao.toUpperCase() && <span className="ac-hex mono">{a.icao.toUpperCase()}</span>}
                     </button>
                     {(a.flagged || a.injected) && (
                       <span className="ac-tags">
-                        {a.flagged && <Chip tone="flagged" glyph="◎">Flagged</Chip>}
+                        {a.flagged && <Chip tone="flagged">Flagged</Chip>}
                         {a.injected && <InjectedTag short />}
                       </span>
                     )}
@@ -87,7 +89,7 @@ export default function AircraftTable({ aircraft, selected, onSelect }) {
                   <td className="num" data-label="GS">{Number.isFinite(a.gs) ? `${fmtNumber(a.gs)} kt` : '—'}</td>
                   <td className="num" data-label="Trk">{fmtTrack(a.track)}</td>
                   <td className="src-col" data-label="Src">
-                    <span className={`src-dot src-${src}`} aria-hidden="true" />{SOURCES[src].label}
+                    <span><span className={`src-dot src-${src}`} aria-hidden="true" />{SOURCES[src].label}</span>
                   </td>
                 </tr>
               )

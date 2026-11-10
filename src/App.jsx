@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router-dom'
+import { BrowserRouter, Link, NavLink, Route, Routes, useLocation } from 'react-router-dom'
 import { api } from './api.js'
-import { Empty, ErrorState, Icon, Loading, SessionContext, usePageTitle, useSession } from './components/ui.jsx'
+import { Empty, ErrorState, Icon, Loading, LogoMark, SessionContext, usePageTitle, useSession } from './components/ui.jsx'
 import { ATTRIBUTION, DISCLAIMER, GITHUB_URL } from './lib.js'
 import Aircraft from './pages/Aircraft.jsx'
 import AircraftDetail from './pages/AircraftDetail.jsx'
@@ -15,42 +15,47 @@ import ScenarioPlayer from './pages/ScenarioPlayer.jsx'
 import Scenarios from './pages/Scenarios.jsx'
 import Upload from './pages/Upload.jsx'
 
-const NAV = [
-  ['/', 'Live map'],
-  ['/alerts', 'Alerts'],
-  ['/aircraft', 'Aircraft'],
-  ['/detections', 'Detections'],
-  ['/scenarios', 'Scenarios'],
-  ['/reports', 'Reports'],
+const NAV_GROUPS = [
+  ['Monitor', [['/', 'Live map', 'map'], ['/alerts', 'Alerts', 'alert'], ['/aircraft', 'Aircraft', 'plane']]],
+  ['Analyse', [['/detections', 'Detections', 'detections'], ['/scenarios', 'Scenarios', 'scenarios'], ['/reports', 'Reports', 'reports']]],
 ]
+const ADMIN_GROUP = ['Admin', [['/admin/upload', 'Upload', 'upload']]]
+const SECTIONS = { alerts: 'Alerts', aircraft: 'Aircraft', scenarios: 'Scenarios', detections: 'Detections', reports: 'Reports' }
 
 function Brand() {
   return (
     <NavLink to="/" className="brand" aria-label="GhostTrack, live map">
-      <span className="brand-mark" aria-hidden="true"><Icon name="radar" size={20} /></span>
-      <span className="brand-text">
-        <span className="brand-name">GhostTrack</span>
-        <span className="brand-sub">ADS-B spoofing detector</span>
-      </span>
+      <LogoMark size={26} />
+      <span className="brand-name">GhostTrack</span>
     </NavLink>
+  )
+}
+
+/** Where the person is: the section, and the item inside it on detail pages. */
+function Crumbs() {
+  const { pathname } = useLocation()
+  const [first, rest] = pathname.split('/').filter(Boolean)
+  if (!first) return <p className="crumbs">Live map</p>
+  if (first === 'admin') return <p className="crumbs">Admin <span aria-hidden="true">/</span> Upload</p>
+  const label = SECTIONS[first]
+  if (!label) return <p className="crumbs">Not found</p>
+  if (!rest) return <p className="crumbs">{label}</p>
+  const item = first === 'alerts' ? `#${decodeURIComponent(rest)}` : first === 'aircraft' ? decodeURIComponent(rest).toUpperCase() : decodeURIComponent(rest)
+  return (
+    <p className="crumbs">
+      <Link to={`/${first}`}>{label}</Link> <span aria-hidden="true">/</span> <span className="mono">{item}</span>
+    </p>
   )
 }
 
 function AccountArea({ onLogout }) {
   const { user, guest, demo, authConfigured, signIn } = useSession()
   if (guest) {
-    return (
-      <div className="account">
-        <span className="badge demo" title="Hosted demo: recorded traffic with scheduled injected scenarios. Browsing is read-only.">
-          <Icon name="lock" size={13} /> Demo · read-only
-        </span>
-        {authConfigured && <button type="button" className="btn ghost small" onClick={signIn}>Sign in</button>}
-      </div>
-    )
+    return authConfigured ? <button type="button" className="btn ghost small" onClick={signIn}>Sign in</button> : null
   }
   return (
     <div className="account">
-      {demo && <span className="badge demo" title="Hosted demo: recorded traffic with scheduled injected scenarios.">Demo</span>}
+      {demo && <span className="chip neutral" title="Hosted demo: recorded traffic with scheduled injected scenarios.">Demo</span>}
       <span className="account-user">{user}</span>
       <button type="button" className="btn ghost small" onClick={onLogout}>Sign out</button>
     </div>
@@ -83,60 +88,81 @@ function NotFound() {
 }
 
 function Shell({ onLogout }) {
-  const { version, guest } = useSession()
-  // The recording upload is for the admin only; guests never see the link.
-  const nav = guest ? NAV : [...NAV, ['/admin/upload', 'Upload']]
+  const { version, guest, demo } = useSession()
+  const groups = guest ? NAV_GROUPS : [...NAV_GROUPS, ADMIN_GROUP] // the recording upload is for the admin only
   const mainRef = useRef(null)
+  const [open, setOpen] = useState(false)
+  const { pathname } = useLocation()
   useFocusOnNavigate(mainRef)
+  useEffect(() => { setOpen(false) }, [pathname])
+  useEffect(() => {
+    if (!open) return undefined
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
   return (
     <div className="app">
       <a className="skip-link" href="#main">Skip to content</a>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <Brand />
-          <nav className="nav" aria-label="Main">
-            <ul>
-              {nav.map(([to, label]) => (
-                <li key={to}><NavLink to={to} end={to === '/'}>{label}</NavLink></li>
-              ))}
-            </ul>
-          </nav>
+      <aside className={`sidebar${open ? ' open' : ''}`} id="sidebar">
+        <div className="sidebar-top"><Brand /></div>
+        <nav className="nav" aria-label="Main">
+          {groups.map(([heading, items]) => (
+            <div className="nav-group" key={heading}>
+              <p className="nav-heading" id={`nav-${heading}`}>{heading}</p>
+              <ul aria-labelledby={`nav-${heading}`}>
+                {items.map(([to, label, icon]) => (
+                  <li key={to}><NavLink to={to} end={to === '/'}><Icon name={icon} />{label}</NavLink></li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+        <div className="sidebar-foot">
+          <p className="status-line"><span className="status-dot live" aria-hidden="true" />{demo || guest ? 'Demo, read-only' : 'Signed in'}</p>
+          <p className="muted small">v{version}</p>
+        </div>
+      </aside>
+      {open && <button type="button" className="scrim" aria-label="Close menu" onClick={() => setOpen(false)} />}
+      <div className="main-col">
+        <header className="topbar">
+          <button type="button" className="btn ghost small icon-only menu-btn" aria-expanded={open} aria-controls="sidebar"
+            onClick={() => setOpen((v) => !v)}>
+            <Icon name={open ? 'close' : 'menu'} /><span className="sr-only">{open ? 'Close menu' : 'Open menu'}</span>
+          </button>
+          <span className="topbar-brand"><Brand /></span>
+          <Crumbs />
           <div className="topbar-right">
             <a className="gh-link" href={GITHUB_URL} target="_blank" rel="noreferrer">
-              <Icon name="github" size={18} /><span className="gh-text">GitHub</span>
+              <span className="gh-text">GitHub</span><Icon name="external" size={14} />
               <span className="sr-only"> (opens in a new tab)</span>
             </a>
             <AccountArea onLogout={onLogout} />
           </div>
-        </div>
-      </header>
-      <main id="main" className="main" ref={mainRef}>
-        <Routes>
-          <Route path="/" element={<LiveMap />} />
-          <Route path="/alerts" element={<Alerts />} />
-          <Route path="/alerts/:alertId" element={<AlertDetail />} />
-          <Route path="/aircraft" element={<Aircraft />} />
-          <Route path="/aircraft/:icao" element={<AircraftDetail />} />
-          <Route path="/detections" element={<Detections />} />
-          <Route path="/scenarios" element={<Scenarios />} />
-          <Route path="/scenarios/:name" element={<ScenarioPlayer />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/admin/upload" element={<Upload />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </main>
-      <footer className="footer">
-        <div className="footer-inner">
-          <p className="disclaimer">{DISCLAIMER}</p>
-          <p className="footer-meta">
-            {ATTRIBUTION} Map outlines: Natural Earth (public domain).
-          </p>
-          <p className="footer-meta">
+        </header>
+        <main id="main" className="main" ref={mainRef}>
+          <Routes>
+            <Route path="/" element={<LiveMap />} />
+            <Route path="/alerts" element={<Alerts />} />
+            <Route path="/alerts/:alertId" element={<AlertDetail />} />
+            <Route path="/aircraft" element={<Aircraft />} />
+            <Route path="/aircraft/:icao" element={<AircraftDetail />} />
+            <Route path="/detections" element={<Detections />} />
+            <Route path="/scenarios" element={<Scenarios />} />
+            <Route path="/scenarios/:name" element={<ScenarioPlayer />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/admin/upload" element={<Upload />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </main>
+        <footer className="footer">
+          <p>{DISCLAIMER} {ATTRIBUTION} Map outlines: Natural Earth (public domain).</p>
+          <p>
             GhostTrack v{version} · Never transmits; analyses decoded data only ·{' '}
             <a href={GITHUB_URL} target="_blank" rel="noreferrer">Source on GitHub<span className="sr-only"> (opens in a new tab)</span></a>
           </p>
-        </div>
-      </footer>
+        </footer>
+      </div>
     </div>
   )
 }

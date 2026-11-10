@@ -82,14 +82,14 @@ export default function Alerts() {
 
   return (
     <div className="page">
-      <PageHead eyebrow="Triage queue" title="Alerts"
-        lead="Each alert names the detection that fired and the values that failed it. Alerts from injected scenarios are labelled as test data." />
+      <PageHead title="Alerts"
+        lead="Each alert names the detection that fired and the values that failed it. Injected scenarios are labelled as test data." />
 
-      <section className="filters card" aria-label="Filter alerts">
+      <section className="toolbar" aria-label="Filter alerts">
         <label className="field compact grow">
           <span>Search</span>
           <span className="input-icon">
-            <Icon name="search" size={15} />
+            <Icon name="search" size={14} />
             <input type="search" placeholder="Callsign or hex, e.g. ALT1 or adfbb1" value={text} maxLength={SEARCH_MAX}
               onChange={(e) => setText(e.target.value)} />
           </span>
@@ -138,7 +138,7 @@ export default function Alerts() {
                 : <>Alerts appear as the detections fire on the traffic. <Link to="/">Watch the live map</Link>.</>}
             </Empty>
           ) : (
-            <div className="card flush table-card">
+            <div className="panel table-card">
               <table className="alert-table">
                 <caption className="sr-only">Alerts, {filters.sort ? 'sorted' : 'newest first'}</caption>
                 <thead>

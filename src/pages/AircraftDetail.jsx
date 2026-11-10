@@ -61,11 +61,9 @@ export default function AircraftDetail() {
   const mini = { track: points, evidence: [], icao: hex, callsign: reg.callsign, injected: data.injected }
   return (
     <div className="page aircraft-page">
-      <Back />
       <header className="page-head detail-head">
         <div className="page-head-text">
-          <p className="eyebrow">Aircraft · <span className="mono">{hex.toUpperCase()}</span></p>
-          <h1 tabIndex={-1}>{name}</h1>
+          <h1 tabIndex={-1}>{name}<span className="head-meta mono">{hex.toUpperCase()}</span></h1>
           <div className="chips">
             {findings.length > 0 && flagged && <FlaggedTag />}
             <OriginTag item={data} />
@@ -73,14 +71,14 @@ export default function AircraftDetail() {
           </div>
         </div>
         <div className="page-head-actions">
-          <Link className="btn secondary small" to={`/?select=${encodeURIComponent(hex)}`}><Icon name="map" size={15} /> Show on the live map</Link>
+          <Link className="btn secondary small" to={`/?select=${encodeURIComponent(hex)}`}><Icon name="map" size={14} /> Show on the live map</Link>
         </div>
       </header>
       {data.injected && <p className="injected-banner">{INJECTED_NOTICE}</p>}
 
       <div className="detail-grid">
         <div className="detail-main">
-          <section className="card" aria-labelledby="profile-title">
+          <section className="group" aria-labelledby="profile-title">
             <h2 id="profile-title">Altitude and speed profile</h2>
             <p className="small muted">
               {points.length
@@ -98,12 +96,12 @@ export default function AircraftDetail() {
             <p className="small muted attribution">{ATTRIBUTION}</p>
           </section>
 
-          <section className="card" aria-labelledby="track-title">
+          <section className="group" aria-labelledby="track-title">
             <h2 id="track-title">Track history</h2>
             <TrackMini alert={mini} empty="No track points are stored for this aircraft (history keeps a rolling window)." />
           </section>
 
-          <section className="card" aria-labelledby="findings-title">
+          <section className="group" aria-labelledby="findings-title">
             <h2 id="findings-title">Findings</h2>
             {findings.length === 0 ? (
               <Empty>No detection has fired for this aircraft. Checks whose inputs are missing are not evaluated, so a clean history is not proof the data is genuine.</Empty>
@@ -132,7 +130,7 @@ export default function AircraftDetail() {
         </div>
 
         <div className="detail-side">
-          <section className="card" aria-labelledby="ident-title">
+          <section className="group" aria-labelledby="ident-title">
             <h2 id="ident-title">Identity and registration</h2>
             <dl className="kv">
               <Fact label="ICAO address"><span className="mono">{hex.toUpperCase()}</span></Fact>
@@ -150,7 +148,7 @@ export default function AircraftDetail() {
             </p>
           </section>
 
-          <section className="card" aria-labelledby="hist-title">
+          <section className="group" aria-labelledby="hist-title">
             <h2 id="hist-title">History</h2>
             <dl className="kv">
               <Fact label="Reports">{fmtNumber(points.length)}</Fact>

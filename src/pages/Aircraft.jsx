@@ -31,14 +31,14 @@ export default function Aircraft() {
 
   return (
     <div className="page">
-      <PageHead eyebrow="Track history" title="Aircraft"
-        lead="Pick an aircraft to see its altitude and speed profile, track, registration facts and findings. The list is the current picture; any six-digit hex address can be looked up." />
+      <PageHead title="Aircraft"
+        lead="The current picture, flagged first. Open one for its profile, track and findings, or look up any six-digit hex address." />
 
-      <form className="filters card" onSubmit={lookup} role="search" aria-label="Find an aircraft">
+      <form className="toolbar" onSubmit={lookup} role="search" aria-label="Find an aircraft">
         <label className="field compact grow">
           <span>Callsign or hex address</span>
           <span className="input-icon">
-            <Icon name="search" size={15} />
+            <Icon name="search" size={14} />
             <input type="search" placeholder="e.g. GHO1 or adf81e" value={query} maxLength={16}
               onChange={(e) => setQuery(e.target.value)} />
           </span>
@@ -66,7 +66,7 @@ export default function Aircraft() {
           {rows.length === 0 ? (
             <div className="state">No aircraft match. {HEX6.test(q) && <>Try the look-up button to open its stored history.</>}</div>
           ) : (
-            <div className="card flush table-card">
+            <div className="panel table-card">
               <table className="data-table stack-table ac-index">
                 <caption className="sr-only">Aircraft in the current picture, flagged first</caption>
                 <thead>
@@ -83,7 +83,7 @@ export default function Aircraft() {
                   {rows.map((a) => {
                     const src = sourceOf(a.source)
                     return (
-                      <tr key={a.icao} className={a.flagged ? 'sev-row-high' : ''}>
+                      <tr key={a.icao}>
                         <th scope="row" className="name-cell">
                           <Link to={`/aircraft/${encodeURIComponent(a.icao)}`} className="alert-link ac-subject">
                             {aircraftName(a)}<span className="sr-only"> track history</span>
@@ -93,9 +93,9 @@ export default function Aircraft() {
                         <td className="num" data-label="Altitude">{fmtAlt(a.alt, a.on_ground)}</td>
                         <td className="num" data-label="Speed">{Number.isFinite(a.gs) ? `${fmtNumber(a.gs)} kt` : '—'}</td>
                         <td className="num" data-label="Track">{fmtTrack(a.track)}</td>
-                        <td data-label="Source"><span className={`src-dot src-${src}`} aria-hidden="true" />{SOURCES[src].label}</td>
+                        <td data-label="Source"><span><span className={`src-dot src-${src}`} aria-hidden="true" />{SOURCES[src].label}</span></td>
                         <td data-label="Status" className="status-cell">
-                          {a.flagged && <Chip tone="flagged" glyph="◎">Flagged</Chip>}
+                          {a.flagged && <Chip tone="flagged">Flagged</Chip>}
                           {a.injected && <> <InjectedTag short /></>}
                           {!a.flagged && !a.injected && <span className="muted small">{a.alert_ids?.length ? 'Low severity only' : 'No alerts'}</span>}
                         </td>

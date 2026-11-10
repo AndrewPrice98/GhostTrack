@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { api } from '../api.js'
 import {
   Chip, ErrorState, Icon, InjectedTag, Loading, PageHead, SeverityChip, useAsync, usePageTitle,
@@ -12,63 +13,63 @@ function List({ items }) {
   return <ul className="plain-list">{items.map((x) => <li key={x}>{x}</li>)}</ul>
 }
 
-function DetectionCard({ d }) {
+/** One catalog row: id, title, severity and scope; the rationale, thresholds and notes open beneath it. */
+function DetectionRow({ d, open, onToggle }) {
   const entries = Object.entries(d.thresholds || {})
   return (
-    <article className="card det-card" id={d.id} aria-labelledby={`${d.id}-title`}>
-      <header className="det-head">
-        <div>
-          <p className="eyebrow mono">{d.id}</p>
-          <h3 id={`${d.id}-title`}>{d.title}</h3>
+    <details className="det-row" id={d.id} open={open} onToggle={(e) => onToggle(d.id, e.currentTarget.open)}>
+      <summary>
+        <Icon name="chevron" size={14} />
+        <span className="det-id mono">{d.id}</span>
+        <span className="det-title">{d.title}</span>
+        <SeverityChip severity={d.severity} />
+        <span className="det-scope muted small">{SCOPES[d.scope] || d.scope}</span>
+      </summary>
+      <div className="det-body">
+        <p className="det-rationale">{d.rationale}</p>
+        <div className="det-cols">
+          <section aria-labelledby={`${d.id}-th`}>
+            <h4 id={`${d.id}-th`}>Thresholds</h4>
+            {entries.length ? (
+              <dl className="thresholds">
+                {entries.map(([k, v]) => (
+                  <div key={k}><dt>{humanKey(k)}</dt><dd>{fmtThreshold(v)}</dd></div>
+                ))}
+              </dl>
+            ) : <p className="muted small">No numeric thresholds.</p>}
+            <h4>Inputs</h4>
+            <p className="chips tight">{(d.inputs || []).map((i) => <code key={i}>{i}</code>)}</p>
+          </section>
+          <section>
+            <h4>False-positive notes</h4>
+            <p className="small">{d.false_positive_notes || 'None recorded.'}</p>
+            <h4>Possible benign causes</h4>
+            {d.benign_causes?.length ? <List items={d.benign_causes} /> : <p className="muted small">None documented.</p>}
+          </section>
         </div>
-        <div className="chips">
-          <SeverityChip severity={d.severity} />
-          <Chip>{SCOPES[d.scope] || d.scope}</Chip>
+        <div className="det-foot small">
+          {d.references?.length > 0 && (
+            <details>
+              <summary>References ({d.references.length})</summary>
+              <List items={d.references} />
+            </details>
+          )}
+          <Link to={`/alerts?detection=${encodeURIComponent(d.id)}`}>Alerts from {d.id} <Icon name="arrow" size={14} /></Link>
         </div>
-      </header>
-      <p className="det-rationale">{d.rationale}</p>
-      <div className="det-cols">
-        <section aria-labelledby={`${d.id}-th`}>
-          <h4 id={`${d.id}-th`}>Thresholds</h4>
-          {entries.length ? (
-            <dl className="thresholds">
-              {entries.map(([k, v]) => (
-                <div key={k}><dt>{humanKey(k)}</dt><dd>{fmtThreshold(v)}</dd></div>
-              ))}
-            </dl>
-          ) : <p className="muted small">No numeric thresholds.</p>}
-          <h4>Inputs</h4>
-          <p className="chips tight">{(d.inputs || []).map((i) => <code key={i}>{i}</code>)}</p>
-        </section>
-        <section>
-          <h4>False-positive notes</h4>
-          <p className="small">{d.false_positive_notes || 'None recorded.'}</p>
-          <h4>Possible benign causes</h4>
-          {d.benign_causes?.length ? <List items={d.benign_causes} /> : <p className="muted small">None documented.</p>}
-        </section>
       </div>
-      <div className="det-foot small">
-        {d.references?.length > 0 && (
-          <details>
-            <summary>References ({d.references.length})</summary>
-            <List items={d.references} />
-          </details>
-        )}
-        <Link to={`/alerts?detection=${encodeURIComponent(d.id)}`}>Alerts from {d.id} <Icon name="arrow" size={14} /></Link>
-      </div>
-    </article>
+    </details>
   )
 }
 
 function ResultChip({ r }) {
   if (r.gap) {
     return r.passed
-      ? <Chip tone="warn" glyph="!">Known blind spot</Chip>
-      : <Chip tone="sev-high" glyph="✕">Now detected: promote</Chip>
+      ? <Chip tone="warn">Known blind spot</Chip>
+      : <Chip tone="sev-high">Now detected: promote</Chip>
   }
   return r.passed && !r.collateral
-    ? <Chip tone="good" glyph="✓">Pass</Chip>
-    : <Chip tone="sev-high" glyph="✕">Fail</Chip>
+    ? <Chip tone="good">Pass</Chip>
+    : <Chip tone="sev-high">Fail</Chip>
 }
 
 function Ids({ ids, expected = [] }) {
@@ -84,7 +85,7 @@ function Ids({ ids, expected = [] }) {
 
 function ValidationTable({ rows, gap }) {
   return (
-    <div className="card flush table-card">
+    <div className="panel table-card">
       <table className="data-table stack-table validation-table">
         <caption className="sr-only">{gap ? 'Documented gaps' : 'Scenario validation results'}</caption>
         <thead>
@@ -119,8 +120,8 @@ function ValidationTable({ rows, gap }) {
 
 /** Measured false positives per hour against the budget, as horizontal bars (hand-rolled SVG). */
 function BudgetBars({ budget, rows }) {
-  const w = 560
-  const row = 34
+  const w = 520
+  const row = 26
   const left = 132
   const right = 16
   const top = 22
@@ -135,9 +136,9 @@ function BudgetBars({ budget, rows }) {
         <line className="bud-axis" x1={left} x2={left} y1={top - 6} y2={h - 14} />
         {rows.map((r, i) => (
           <g key={r.recording} transform={`translate(0 ${top + i * row})`}>
-            <text className="bud-label" x={left - 8} y="14" textAnchor="end">{r.recording.replace('.jsonl.gz', '')}</text>
-            <rect className={`bud-bar${r.within_budget ? '' : ' over'}`} x={left} y="3" height="18" width={Math.max(2, x(r.per_hour) - left)} rx="3" />
-            <text className="bud-value" x={x(r.per_hour) + 6} y="16">{r.per_hour.toFixed(2)} / h</text>
+            <text className="bud-label" x={left - 8} y="13" textAnchor="end">{r.recording.replace('.jsonl.gz', '')}</text>
+            <rect className={`bud-bar${r.within_budget ? '' : ' over'}`} x={left} y="4" height="10" width={Math.max(2, x(r.per_hour) - left)} rx="1" />
+            <text className="bud-value" x={x(r.per_hour) + 6} y="13">{r.per_hour.toFixed(2)} / h</text>
           </g>
         ))}
         <line className="bud-line" x1={x(budget)} x2={x(budget)} y1={top - 10} y2={h - 14} />
@@ -175,13 +176,12 @@ function Validation({ v }) {
         <p className="muted">
           Findings of severity {fp.min_severity} or higher on clean recordings, per hour, against a budget of{' '}
           <strong>{fmtNumber(fp.budget_per_hour, 2)} per hour</strong>. Verdict:{' '}
-          <Chip tone={fp.verdict === 'within budget' ? 'good' : fp.verdict === 'over budget' ? 'sev-high' : 'neutral'}
-            glyph={fp.verdict === 'within budget' ? '✓' : fp.verdict === 'over budget' ? '✕' : 'i'}>{fp.verdict}</Chip>
+          <Chip tone={fp.verdict === 'within budget' ? 'good' : fp.verdict === 'over budget' ? 'sev-high' : 'neutral'}>{fp.verdict}</Chip>
         </p>
         {fp.recordings.length > 0 && (
           <>
             <BudgetBars budget={fp.budget_per_hour} rows={fp.recordings} />
-            <div className="card flush table-card">
+            <div className="panel table-card">
               <table className="data-table stack-table fp-table">
                 <caption className="sr-only">False-positive measurements per recording</caption>
                 <thead>
@@ -203,7 +203,7 @@ function Validation({ v }) {
                       <td className="num" data-label="Tracks">{fmtNumber(r.tracks)}</td>
                       <td className="num" data-label="Counted">{fmtNumber(r.counted)}</td>
                       <td className="num" data-label="Per hour">{fmtNumber(r.per_hour, 2)}</td>
-                      <td data-label="Budget">{r.within_budget ? <Chip tone="good" glyph="✓">Within</Chip> : <Chip tone="sev-high" glyph="✕">Over</Chip>}</td>
+                      <td data-label="Budget">{r.within_budget ? <Chip tone="good">Within</Chip> : <Chip tone="sev-high">Over</Chip>}</td>
                       <td data-label="Findings">
                         {r.counts.length
                           ? r.counts.map((c) => <span key={`${c.detection_id}${c.severity}`} className="mono small">{c.detection_id} {c.severity} ×{c.count} </span>)
@@ -229,26 +229,34 @@ function Validation({ v }) {
 export default function Detections() {
   usePageTitle('Detections')
   const { data, loading, error, reload } = useAsync(() => api.detections(), [])
+  const { hash } = useLocation()
+  const [opened, setOpened] = useState({})
+  const target = decodeURIComponent(hash.slice(1))
+  // A link such as /detections#GT-006 opens that row and scrolls to it.
+  useEffect(() => {
+    if (!data || !target) return
+    if (!data.detections.some((d) => d.id === target)) return
+    setOpened((o) => ({ ...o, [target]: true }))
+    requestAnimationFrame(() => document.getElementById(target)?.scrollIntoView({ block: 'start' }))
+  }, [data, target])
+  const toggle = (id, isOpen) => setOpened((o) => (o[id] === isOpen ? o : { ...o, [id]: isOpen }))
   return (
     <div className="page">
-      <PageHead eyebrow="Catalog and validation" title="Detections"
-        lead="Ten plausibility checks on decoded ADS-B data. None proves spoofing on its own: each states why it can fire, what usually explains it, and how it was measured." />
+      <PageHead title="Detections"
+        lead="Ten plausibility checks on decoded ADS-B data. None proves spoofing on its own: each states why it can fire and how it was measured." />
       {loading && !data && <Loading label="Loading the detection catalog…" />}
       {error && <ErrorState error={error} onRetry={reload} />}
       {data && (
         <>
-          <p className="muted small catalog-note">
-            Catalog version {data.version}. Every threshold on this page is read from the detection catalog through the API;
-            the detections and this page use the same numbers. A check that lacks its inputs is reported as not evaluated, never as clean.
-          </p>
-          <nav aria-label="Detections" className="det-jump">
-            <ul>
-              {data.detections.map((d) => <li key={d.id}><a href={`#${d.id}`} className="mono">{d.id}</a></li>)}
-            </ul>
-          </nav>
           <section aria-labelledby="cat-title" className="section">
-            <h2 id="cat-title">Catalog</h2>
-            <div className="det-list">{data.detections.map((d) => <DetectionCard key={d.id} d={d} />)}</div>
+            <h2 id="cat-title">Catalog <span className="muted small">version {data.version}</span></h2>
+            <div className="panel det-list">
+              {data.detections.map((d) => <DetectionRow key={d.id} d={d} open={Boolean(opened[d.id])} onToggle={toggle} />)}
+            </div>
+            <p className="muted small catalog-note">
+              Every threshold is read from the detection catalog through the API; the detections and this page use the same
+              numbers. A check that lacks its inputs is reported as not evaluated, never as clean.
+            </p>
           </section>
           <Validation v={data.validation} />
         </>

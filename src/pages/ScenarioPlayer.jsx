@@ -30,7 +30,7 @@ function Controls({ idx, win, playing, speed, reduced, rel, onPlay, onStep, onSe
     <div className="player-controls" role="group" aria-label="Replay controls">
       <div className="player-buttons">
         <button type="button" className="btn ghost small icon-only" onClick={onRestart} aria-label="Restart from the beginning">
-          <Icon name="refresh" size={16} />
+          <Icon name="reset" size={16} />
         </button>
         <button type="button" className="btn secondary small icon-only" onClick={() => onStep(-1)} disabled={idx <= win.start}
           aria-label="Previous step">
@@ -70,7 +70,7 @@ function EventItem({ e, fired, current, injectT }) {
   return (
     <li className={`event${fired ? ' fired' : ''}${current ? ' current' : ''}`} data-detection={e.detection_id}>
       <div className="event-head">
-        {fired ? <Chip tone="sev-high" glyph="◎">Fired</Chip> : <Chip glyph="…">Waiting</Chip>}
+        {fired ? <span className="status status-fired"><span className="status-dot" aria-hidden="true" />Fired</span> : <span className="status status-waiting"><span className="status-dot" aria-hidden="true" />Waiting</span>}
         <SeverityChip severity={e.severity} />
         <span className="mono small muted">{relTime(e.fireT, injectT)}{e.derived && <span className="validated"> (validated)</span>}</span>
       </div>
@@ -164,7 +164,7 @@ function Player({ replay, result }) {
         {sel && (
           <p className="small selected-line">
             <strong className="mono">{aircraftName(sel)}</strong> {sel.injected && <InjectedTag short />}
-            {sel.flagged && <> <Chip tone="flagged" glyph="◎">Flagged</Chip></>}
+            {sel.flagged && <> <Chip tone="flagged">Flagged</Chip></>}
             {' '}{Number.isFinite(sel.alt) ? `${fmtNumber(sel.alt)} ft` : ''}{Number.isFinite(sel.gs) ? ` · ${fmtNumber(sel.gs)} kt` : ''}
           </p>
         )}
@@ -172,7 +172,7 @@ function Player({ replay, result }) {
       </div>
 
       <aside className="player-side" aria-label="Scenario details and detections">
-        <section className="card" aria-labelledby="what-title">
+        <section className="group" aria-labelledby="what-title">
           <h2 id="what-title">What is being replayed</h2>
           <p>{sc.simulates}</p>
           <dl className="kv">
@@ -186,7 +186,7 @@ function Player({ replay, result }) {
           <p className="small muted">Source: {sc.reference}</p>
         </section>
 
-        <section className="card" aria-labelledby="fire-title">
+        <section className="group" aria-labelledby="fire-title">
           <h2 id="fire-title">Detections firing</h2>
           {events.length === 0 ? (
             <p className="state small">
@@ -233,14 +233,13 @@ export default function ScenarioPlayer() {
   const { data, loading, error } = state
   return (
     <div className="page player-page">
-      <p className="back"><Link to="/scenarios"><Icon name="back" size={15} /> All scenarios</Link></p>
       {loading && <Loading label="Loading the replay…" />}
       {error && (error.status === 404
         ? <div className="state"><h1 tabIndex={-1} className="h-inline">Scenario not found.</h1> <Link to="/scenarios">See the available scenarios</Link>.</div>
         : <><h1 tabIndex={-1} className="sr-only">Scenario replay</h1><ErrorState error={error} onRetry={() => setTick((t) => t + 1)} /></>)}
       {data && (
         <>
-          <PageHead eyebrow="Scenario replay" title={data.replay.scenario.title}>
+          <PageHead title={data.replay.scenario.title}>
             <InjectedTag label={data.replay.label} />
           </PageHead>
           <p className="injected-banner">{data.replay.notice}. This replay is injected test data produced by a documented attack scenario, not real air traffic.</p>

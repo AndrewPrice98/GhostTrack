@@ -16,8 +16,8 @@ const DIAMOND = 'M0 -.7L.7 0L0 .7L-.7 0Z' // no reported track
 const GROUND = 'M-.45 -.45H.45V.45H-.45Z' // on the ground
 
 // Glyph and label sizes in screen pixels, a little smaller on narrow maps.
-const glyphPx = (width) => Math.max(15, Math.min(22, width / 34))
-const LABEL_PX = 11.5
+const glyphPx = (width) => Math.max(11, Math.min(15, width / 52))
+const LABEL_PX = 11
 const DRAG_PX = 4
 
 function graticule() {
@@ -280,7 +280,10 @@ export default function RadarMap({ aircraft, selected, onSelect, trails = {}, su
           <button type="button" className="map-btn" onClick={reset} disabled={atHome}
             aria-label="Reset view" title="Reset view (0)"><Icon name="home" /></button>
         </div>
-        <div className="radar-north" aria-hidden="true"><span>N</span></div>
+        <div className="radar-north" aria-hidden="true">
+          <svg width="10" height="12" viewBox="0 0 10 12"><path d="M5 0.5 9 9 5 7 1 9Z" /></svg>
+          <span>N</span>
+        </div>
         {summary && <div className="radar-summary" aria-hidden="true">{summary}</div>}
         <p className="radar-attrib">ADS-B data: adsb.lol, ODbL · Map: Natural Earth</p>
         {overlay}
@@ -299,7 +302,7 @@ export function Legend() {
   const prefix = 'legend'
   const item = (cls, label, inj = false) => (
     <li key={label}>
-      <svg width="22" height="22" viewBox="-1.4 -1.4 2.8 2.8" aria-hidden="true" focusable="false" className={`ac ${cls}`}>
+      <svg width="18" height="18" viewBox="-1.4 -1.4 2.8 2.8" aria-hidden="true" focusable="false" className={`ac ${cls}`}>
         {cls.includes('flagged') && <circle className="flag-ring" r="1.2" />}
         <path className="glyph" d={PLANE} transform="rotate(45) scale(.8)"
           fill={inj ? `url(#${prefix}-hatch-${cls.split(' ')[0].replace('src-', '')})` : undefined} />
@@ -313,7 +316,7 @@ export function Legend() {
       <p className="legend-title">Legend</p>
       <ul>
         {Object.entries(SOURCES).map(([k, s]) => item(`src-${k}`, s.label))}
-        {item('src-adsb flagged', 'Flagged: medium or higher (red ring)')}
+        {item('src-adsb flagged', 'Flagged: medium or higher (ring)')}
         {item('src-adsb injected', 'Injected test data (hatched)', true)}
       </ul>
     </div>

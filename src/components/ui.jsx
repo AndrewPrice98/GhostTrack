@@ -1,27 +1,28 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { injectedTagText, SEVERITY, STATUS } from '../lib.js'
+import {
+  ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, Download, ExternalLink, FileText, FlaskConical, House, Info, ListChecks,
+  Lock, Map as MapIcon, Menu, Minus, Pause, Play, Plane, Plus, RefreshCw, RotateCcw, Search, SkipBack, SkipForward,
+  TriangleAlert, Upload, X,
+} from 'lucide-react'
+import { INJECTED_LABEL, injectedTagText, SEVERITY, STATUS } from '../lib.js'
 
 // -- small presentational pieces ------------------------------------------------------------
 
-/** Status chip: glyph + text label + tone, so it never relies on colour alone. */
-export function Chip({ tone = 'neutral', glyph, children, title, className = '' }) {
-  return (
-    <span className={`chip ${tone} ${className}`} title={title}>
-      {glyph && <span className="chip-glyph" aria-hidden="true">{glyph}</span>}
-      {children}
-    </span>
-  )
+/** Compact tag: tinted background, text label, no icon and no border, so it never relies on colour alone. */
+export function Chip({ tone = 'neutral', children, title, className = '' }) {
+  return <span className={`chip ${tone} ${className}`} title={title}>{children}</span>
 }
 
 export function SeverityChip({ severity }) {
   const s = SEVERITY[severity] || { label: severity, tone: 'neutral' }
-  return <Chip tone={`sev-${severity}`} glyph={s.glyph}>{s.label}<span className="sr-only"> severity</span></Chip>
+  return <Chip tone={`sev-${severity}`}>{s.label}<span className="sr-only"> severity</span></Chip>
 }
 
+/** Status: a 6 px dot plus the text label. */
 export function StatusChip({ status }) {
   const s = STATUS[status] || { label: status, tone: 'neutral' }
-  return <Chip tone={s.tone} glyph={s.glyph}>{s.label}</Chip>
+  return <span className={`status status-${status}`}><span className="status-dot" aria-hidden="true" />{s.label}</span>
 }
 
 /**
@@ -55,7 +56,7 @@ export function DemoNotice() {
 }
 
 export function FlaggedTag() {
-  return <Chip tone="flagged" glyph="◎">Flagged</Chip>
+  return <Chip tone="flagged">Flagged</Chip>
 }
 
 export function Loading({ label = 'Loading…' }) {
@@ -97,12 +98,12 @@ export function FormMessage({ message }) {
   return <span role="status" className={`form-msg ${message?.tone || ''}`}>{message?.text}</span>
 }
 
-export function PageHead({ eyebrow, title, children, lead }) {
+/** Page title with at most one short muted sentence; `meta` is a small mono line (ids) beside the title. */
+export function PageHead({ title, meta, children, lead }) {
   return (
     <header className="page-head">
       <div className="page-head-text">
-        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-        <h1 tabIndex={-1}>{title}</h1>
+        <h1 tabIndex={-1}>{title}{meta && <span className="head-meta mono">{meta}</span>}</h1>
         {lead && <p className="lead">{lead}</p>}
       </div>
       {children && <div className="page-head-actions">{children}</div>}
@@ -110,40 +111,33 @@ export function PageHead({ eyebrow, title, children, lead }) {
   )
 }
 
-export function Icon({ name, size = 16, label }) {
-  const paths = {
-    radar: <><circle cx="10" cy="10" r="7.5" /><circle cx="10" cy="10" r="3.8" /><path d="M10 10 15.3 4.7" /><circle cx="13.2" cy="12.6" r="0.9" fill="currentColor" /></>,
-    github: <path d="M10 1.5a8.5 8.5 0 0 0-2.7 16.6c.4 0 .6-.2.6-.4v-1.5c-2.4.5-2.9-1-2.9-1-.4-1-1-1.3-1-1.3-.8-.5 0-.5 0-.5.9 0 1.3.9 1.3.9.8 1.3 2 1 2.5.7 0-.6.3-1 .6-1.2-1.9-.2-3.9-1-3.9-4.2 0-.9.3-1.7.9-2.3-.1-.2-.4-1.1.1-2.3 0 0 .7-.2 2.3.9a8 8 0 0 1 4.2 0c1.6-1.1 2.3-.9 2.3-.9.5 1.2.2 2 .1 2.3.5.6.9 1.4.9 2.3 0 3.3-2 4-3.9 4.2.3.3.6.8.6 1.6v2.4c0 .2.2.5.6.4A8.5 8.5 0 0 0 10 1.5Z" fill="currentColor" stroke="none" />,
-    back: <path d="M12.5 4.5 7 10l5.5 5.5" />,
-    arrow: <><path d="M4 10h11" /><path d="m11 5.5 4.5 4.5-4.5 4.5" /></>,
-    lock: <><rect x="4" y="9" width="12" height="8.5" rx="1.5" /><path d="M7 9V6.5a3 3 0 0 1 6 0V9" /></>,
-    check: <path d="m4.5 10.5 3.5 3.5 7.5-8" />,
-    download: <><path d="M10 3v10" /><path d="m5.5 8.5 4.5 4.5 4.5-4.5" /><path d="M3.5 16.5h13" /></>,
-    close: <><path d="m5 5 10 10" /><path d="M15 5 5 15" /></>,
-    plus: <><path d="M10 4v12" /><path d="M4 10h12" /></>,
-    minus: <path d="M4 10h12" />,
-    home: <><path d="M3.5 9.5 10 4l6.5 5.5" /><path d="M5.5 8v8h9V8" /></>,
-    refresh: <><path d="M16 10a6 6 0 1 1-1.8-4.3" /><path d="M16.2 3.5v3.3h-3.3" /></>,
-    pause: <><path d="M7.5 5v10" /><path d="M12.5 5v10" /></>,
-    alert: <><path d="M9.1 2.6 1.7 15.2A1.2 1.2 0 0 0 2.7 17h14.6a1.2 1.2 0 0 0 1-1.8L10.9 2.6a1 1 0 0 0-1.8 0Z" /><path d="M10 7.5v4" /><path d="M10 14.2v.1" /></>,
-    plane: <path d="M10 2.2c.8 0 1.2.8 1.2 1.8v4.2l5.6 3.2v1.7l-5.6-1.7v3.3l1.7 1.3v1.3L10 16.6l-2.9.7V16l1.7-1.3v-3.3l-5.6 1.7v-1.7l5.6-3.2V4c0-1 .4-1.8 1.2-1.8Z" />,
-    search: <><circle cx="8.5" cy="8.5" r="5" /><path d="m12.3 12.3 4.2 4.2" /></>,
-    info: <><circle cx="10" cy="10" r="7.5" /><path d="M10 9v5" /><path d="M10 6.2v.1" /></>,
-    map: <><path d="M2.5 5 7.5 3l5 2 5-2v12l-5 2-5-2-5 2V5Z" /><path d="M7.5 3v12M12.5 5v12" /></>,
-    play: <path d="M6 4.2v11.6L15.5 10 6 4.2Z" fill="currentColor" />,
-    step: <><path d="M5 4.5v11" /><path d="M8.5 4.8v10.4L16 10 8.5 4.8Z" fill="currentColor" stroke="none" /></>,
-    stepback: <><path d="M15 4.5v11" /><path d="M11.5 4.8v10.4L4 10l7.5-5.2Z" fill="currentColor" stroke="none" /></>,
-    upload: <><path d="M10 13V3" /><path d="m5.5 7.5 4.5-4.5 4.5 4.5" /><path d="M3.5 16.5h13" /></>,
-    chevron: <path d="m5 7.5 5 5 5-5" />,
-    external: <><path d="M11 3.5h5.5V9" /><path d="M16.5 3.5 9 11" /><path d="M14 12v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" /></>,
-  }
+/** The GhostTrack mark: a track of three solid dots followed by one hollow, offset, dashed dot. Same shapes as public/logo-mark.svg. */
+export function LogoMark({ size = 28 }) {
   return (
-    <svg className="icon" width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor"
-      strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
-      aria-hidden={label ? undefined : 'true'} role={label ? 'img' : undefined} aria-label={label}
-      focusable="false">
-      {paths[name]}
+    <svg className="logo-mark" width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true" focusable="false">
+      <path d="M4.5 19.5H18.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity=".55" />
+      <circle cx="4.5" cy="19.5" r="2.5" fill="currentColor" />
+      <circle cx="11.5" cy="19.5" r="2.5" fill="currentColor" />
+      <circle cx="18.5" cy="19.5" r="2.5" fill="currentColor" />
+      <circle cx="26.5" cy="12.5" r="3.6" stroke="currentColor" strokeWidth="1.75" strokeDasharray="2.6 2.2" />
     </svg>
+  )
+}
+
+const ICONS = {
+  back: ArrowLeft, arrow: ArrowRight, lock: Lock, check: Check, download: Download, close: X, plus: Plus, minus: Minus,
+  home: House, refresh: RefreshCw, pause: Pause, alert: TriangleAlert, plane: Plane, search: Search, info: Info,
+  map: MapIcon, play: Play, step: SkipForward, stepback: SkipBack, upload: Upload, chevron: ChevronDown,
+  up: ArrowUp, down: ArrowDown, external: ExternalLink, menu: Menu, reset: RotateCcw, detections: ListChecks, scenarios: FlaskConical, reports: FileText,
+}
+
+/** One stroke icon set (lucide), 16 px, 1.5 stroke, inheriting the text colour. */
+export function Icon({ name, size = 16, label }) {
+  const Glyph = ICONS[name]
+  if (!Glyph) return null
+  return (
+    <Glyph className="icon" size={size} strokeWidth={1.5} absoluteStrokeWidth
+      aria-hidden={label ? undefined : 'true'} role={label ? 'img' : undefined} aria-label={label} focusable="false" />
   )
 }
 
@@ -245,7 +239,7 @@ export function usePageVisible() {
 export function EmptyCta({ what = 'data', children }) {
   const { guest } = useSession()
   return (
-    <section className="card cta" aria-labelledby="cta-title">
+    <section className="group cta" aria-labelledby="cta-title">
       <h2 id="cta-title">No {what} yet</h2>
       {children && <p className="muted">{children}</p>}
       {guest ? (

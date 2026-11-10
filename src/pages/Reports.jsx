@@ -17,11 +17,11 @@ export default function Reports() {
   const [raw, setRaw] = useState(false)
   return (
     <div className="page">
-      <PageHead eyebrow="Exports" title="Reports"
-        lead="A summary of alerts by detection over the last 24 hours, the scenario validation and the false-positive measurements. Download it, or read the preview first." />
+      <PageHead title="Reports"
+        lead="Alerts by detection over the last 24 hours, the scenario validation and the false-positive measurements." />
 
       <div className="reports-grid">
-        <section className="card" aria-labelledby="dl-title">
+        <section className="group" aria-labelledby="dl-title">
           <h2 id="dl-title">Summary report</h2>
           <p className="muted small">
             Generated when you download it, from the alerts and validation results the dashboard shows. Alerts from injected
@@ -30,8 +30,8 @@ export default function Reports() {
           <ul className="file-list">
             {FILES.map((f) => (
               <li key={f.ext}>
-                <a className="btn secondary" href={api.reportUrl(f.ext)} download={f.file}>
-                  <Icon name="download" size={16} /> {f.label}<span className="sr-only"> summary report ({f.ext})</span>
+                <a className="btn secondary small" href={api.reportUrl(f.ext)} download={f.file}>
+                  <Icon name="download" size={14} /> {f.label}<span className="sr-only"> summary report ({f.ext})</span>
                 </a>
                 <span className="small muted">{f.note}</span>
               </li>
@@ -40,7 +40,7 @@ export default function Reports() {
           <p className="small muted attribution">{ATTRIBUTION}</p>
         </section>
 
-        <section className="card" aria-labelledby="ev-title">
+        <section className="group" aria-labelledby="ev-title">
           <h2 id="ev-title">Evidence packs</h2>
           <p className="muted small">
             Each alert has its own evidence pack (JSON and printable HTML) with the track points, failing checks, units and
@@ -51,7 +51,7 @@ export default function Reports() {
         </section>
       </div>
 
-      <section className="card report-preview" aria-labelledby="pv-title">
+      <section className="group report-preview" aria-labelledby="pv-title">
         <div className="preview-head">
           <h2 id="pv-title">Preview</h2>
           <label className="check">

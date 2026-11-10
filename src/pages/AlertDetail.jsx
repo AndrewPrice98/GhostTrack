@@ -27,7 +27,7 @@ function Triage({ alert, onSaved }) {
 
   if (guest) {
     return (
-      <section className="card triage" aria-labelledby="triage-title">
+      <section className="group triage" aria-labelledby="triage-title">
         <h2 id="triage-title">Triage</h2>
         <dl className="kv">
           <div><dt>Status</dt><dd><StatusChip status={alert.status} /></dd></div>
@@ -61,7 +61,7 @@ function Triage({ alert, onSaved }) {
   }
 
   return (
-    <form className="card triage" aria-labelledby="triage-title" onSubmit={save}>
+    <form className="group triage" aria-labelledby="triage-title" onSubmit={save}>
       <h2 id="triage-title">Triage</h2>
       <fieldset className="radio-list">
         <legend>Status</legend>
@@ -111,11 +111,9 @@ export default function AlertDetail() {
   const tableRows = rows.filter((r) => r.field !== 'addresses')
   return (
     <div className="page alert-page">
-      <p className="back"><Link to="/alerts"><Icon name="back" size={15} /> All alerts</Link></p>
       <header className="page-head detail-head">
         <div className="page-head-text">
-          <p className="eyebrow">Alert #{alert.id} · {alert.detection_id}</p>
-          <h1 tabIndex={-1}>{alert.title}</h1>
+          <h1 tabIndex={-1}>{alert.title}<span className="head-meta mono">#{alert.id} · {alert.detection_id}</span></h1>
           <div className="chips">
             <SeverityChip severity={alert.severity} />
             <StatusChip status={alert.status} />
@@ -132,11 +130,11 @@ export default function AlertDetail() {
 
       <div className="detail-grid">
         <div className="detail-main">
-          <section className="card" aria-labelledby="failed-title">
+          <section className="group" aria-labelledby="failed-title">
             <h2 id="failed-title">What failed</h2>
             <p className="explanation">{alert.explanation}</p>
             {tableRows.length > 0 && (
-              <div className="table-scroll">
+              <div className="table-scroll panel">
                 <table className="evidence-table">
                   <caption className="sr-only">Observed values against thresholds</caption>
                   <thead>
@@ -177,7 +175,7 @@ export default function AlertDetail() {
             </p>
           </section>
 
-          <section className="card" aria-labelledby="benign-title">
+          <section className="group" aria-labelledby="benign-title">
             <h2 id="benign-title">Possible benign causes</h2>
             {alert.benign_causes?.length ? (
               <ul className="benign">{alert.benign_causes.map((c) => <li key={c}>{c}</li>)}</ul>
@@ -185,14 +183,14 @@ export default function AlertDetail() {
             <p className="small muted">Rule these out before treating the alert as spoofing.</p>
           </section>
 
-          <section className="card" aria-labelledby="track-title">
+          <section className="group" aria-labelledby="track-title">
             <h2 id="track-title">Track</h2>
             <TrackMini alert={alert} />
           </section>
         </div>
 
         <div className="detail-side">
-          <section className="card" aria-labelledby="facts-title">
+          <section className="group" aria-labelledby="facts-title">
             <h2 id="facts-title">Details</h2>
             <dl className="kv">
               <div><dt>Aircraft</dt><dd>{alertSubject(alert)}{alert.icao && alert.callsign && <span className="mono muted"> {alert.icao.toUpperCase()}</span>}</dd></div>
@@ -210,7 +208,7 @@ export default function AlertDetail() {
             )}
           </section>
 
-          <section className="card" aria-labelledby="pack-title">
+          <section className="group" aria-labelledby="pack-title">
             <h2 id="pack-title">Evidence pack</h2>
             <p className="small muted">Track points, failing checks with units, data source, timestamps and the ODbL attribution.</p>
             <div className="downloads">

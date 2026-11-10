@@ -78,12 +78,11 @@ export default function AircraftPanel({ aircraft, gone, onClose, focusOnOpen = t
   const src = sourceOf(aircraft.source)
   const more = (aircraft.alert_ids || []).length - ids.length
   return (
-    <aside className={`ac-panel card${collapsed ? ' collapsed' : ''}`} aria-labelledby="ac-panel-title"
+    <aside className={`ac-panel${collapsed ? ' collapsed' : ''}`} aria-labelledby="ac-panel-title"
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); close() } }}>
       <header className="ac-panel-head">
         <div>
-          <p className="eyebrow">Selected aircraft</p>
-          <h2 id="ac-panel-title" ref={headingRef} tabIndex={-1}>{aircraftName(aircraft)}</h2>
+          <h2 id="ac-panel-title" ref={headingRef} tabIndex={-1}><span className="sr-only">Selected aircraft: </span>{aircraftName(aircraft)}</h2>
           <div className="chips">
             {aircraft.flagged && <FlaggedTag />}
             {aircraft.injected && <InjectedTag />}

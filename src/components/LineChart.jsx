@@ -95,7 +95,7 @@ export default function LineChart({ title, unit, field, track, bands = [], zero 
           {xt.map((t) => (
             <g key={t} className="chart-xtick">
               <line x1={sx(t)} x2={sx(t)} y1={M.top + ph} y2={M.top + ph + 4} />
-              <text x={sx(t)} y={M.top + ph + 18} textAnchor="middle">{fmtTime(t)}</text>
+              <text x={sx(t)} y={M.top + ph + 18} textAnchor={sx(t) > M.left + pw - 28 ? 'end' : 'middle'}>{fmtTime(t)}</text>
             </g>
           ))}
           <g clipPath={`url(#${id}-clip)`}>

@@ -36,7 +36,7 @@ function sizeMessage(file, maxMb) {
 function Result({ r }) {
   const dropped = Object.entries(r.dropped_by_reason || {})
   return (
-    <section className="card upload-result" aria-labelledby="res-title">
+    <section className="group upload-result" aria-labelledby="res-title">
       <h2 id="res-title">Upload processed</h2>
       <dl className="kv">
         <div><dt>Snapshots kept</dt><dd>{fmtNumber(r.snapshots_kept)}</dd></div>
@@ -81,8 +81,8 @@ export default function Upload() {
   if (guest) {
     return (
       <div className="page">
-        <PageHead eyebrow="Admin" title="Upload a recording" />
-        <section className="card" aria-labelledby="admin-only">
+        <PageHead title="Upload a recording" />
+        <section className="group" aria-labelledby="admin-only">
           <h2 id="admin-only">Admin only</h2>
           <p className="muted">
             The demo is read-only: only the admin can upload recordings.
@@ -124,10 +124,10 @@ export default function Upload() {
 
   return (
     <div className="page upload-page">
-      <PageHead eyebrow="Admin" title="Upload a recording"
-        lead="Run the detections over a recording of your own. The file is untrusted: every record is validated like the live feed, and the alerts are labelled as unverified." />
+      <PageHead title="Upload a recording"
+        lead="Run the detections over a recording of your own. The file is untrusted and its alerts are labelled as unverified." />
       <div className="upload-grid">
-        <form className="card upload-form" onSubmit={submit} aria-labelledby="up-title">
+        <form className="group upload-form" onSubmit={submit} aria-labelledby="up-title">
           <h2 id="up-title">Recording file</h2>
           <label className="field">
             <span>JSON Lines recording (.jsonl or .jsonl.gz)</span>
@@ -141,7 +141,7 @@ export default function Upload() {
           {file && <p className="small muted">{file.name} · {fmtNumber(file.size / 1024, 1)} KB</p>}
           <div className="form-actions">
             <button className="btn primary" aria-disabled={busy ? 'true' : undefined}>
-              <Icon name="upload" size={16} /> {busy ? 'Uploading…' : 'Upload and analyse'}
+              <Icon name="upload" size={14} /> {busy ? 'Uploading…' : 'Upload and analyse'}
             </button>
             <FormMessage message={message} />
           </div>
@@ -154,7 +154,7 @@ export default function Upload() {
           </p>
         </form>
 
-        <section className="card" aria-labelledby="fmt-title">
+        <section className="group" aria-labelledby="fmt-title">
           <h2 id="fmt-title">Format</h2>
           <p className="small">
             One snapshot per line: a timestamp in epoch seconds and the aircraft seen at that moment. Lines that are not valid

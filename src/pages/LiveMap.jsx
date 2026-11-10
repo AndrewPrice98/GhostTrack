@@ -3,10 +3,11 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 import AircraftPanel from '../components/AircraftPanel.jsx'
 import AircraftTable from '../components/AircraftTable.jsx'
-import RadarMap, { Legend } from '../components/RadarMap.jsx'
+import RadarMap, { BASE, Legend } from '../components/RadarMap.jsx'
 import {
   ErrorState, Icon, Loading, PageHead, usePageTitle, usePageVisible, useReducedMotion, useStoredFlag, useWide,
 } from '../components/ui.jsx'
+import { clampView } from '../geo.js'
 import {
   MODE_KEY, REFRESH_MS, aircraftName, fmtDuration, fmtTime, nextScenario, plural, readStore, writeStore,
 } from '../lib.js'
@@ -14,6 +15,8 @@ import {
 const HINT_KEY = 'ghosttrack.hint-dismissed'
 const PANEL_KEY = 'ghosttrack.panel-collapsed'
 const MAX_TRAILS = 8
+// Open a little tighter than the full basemap so the 60 NM ring fills the frame.
+const HOME_VIEW = clampView({ z: 1.3, cx: 0, cy: 0 }, BASE)
 const TRAIL_WINDOW_S = 15 * 60
 
 /** What identifies an aircraft's track: when this changes, its stored trail has changed too. */
@@ -22,13 +25,13 @@ const trackSig = (a) => `${a.lat},${a.lon},${a.alt},${a.on_ground ? 1 : 0}`
 function ModeToggle({ mode, onChange }) {
   return (
     <fieldset className="mode-toggle">
-      <legend>Traffic</legend>
+      <legend className="sr-only">Traffic</legend>
       <div className="segmented">
         {[['recorded', 'Recorded'], ['live', 'Live']].map(([value, label]) => (
           <label key={value} className={mode === value ? 'on' : ''}>
             <input type="radio" name="traffic-mode" value={value} checked={mode === value}
               onChange={() => onChange(value)} />
-            {value === 'live' && <span className="live-dot" aria-hidden="true" />}
+            {value === 'live' && <span className="status-dot live" aria-hidden="true" />}
             {label}
           </label>
         ))}
@@ -44,60 +47,55 @@ function DataLine({ data, auto, pausedReason, onRefresh, busy }) {
       <p className="dataline-source">
         <span className={`source-dot ${live ? 'live' : 'recorded'}`} aria-hidden="true" />
         <strong>{live ? 'Live from adsb.lol, ODbL' : 'Recorded traffic (replay)'}</strong>
-        <span className="muted"> · Updated <time dateTime={new Date(data.ts * 1000).toISOString()}>{fmtTime(data.ts)}</time></span>
+        <span className="muted">Updated <time dateTime={new Date(data.ts * 1000).toISOString()}>{fmtTime(data.ts)}</time></span>
       </p>
       <p className="dataline-counts">
-        {plural(data.aircraft.length, 'aircraft', 'aircraft')}
-        {' · '}<span className={data.flagged_aircraft ? 'text-flagged' : ''}>{data.flagged_aircraft} flagged</span>
-        {' · '}{data.injected_aircraft} injected
+        <span>{plural(data.aircraft.length, 'aircraft', 'aircraft')}</span>
+        <span>{data.flagged_aircraft > 0 && <span className="status-dot flag" aria-hidden="true" />}{data.flagged_aircraft} flagged</span>
+        <span>{data.injected_aircraft} injected</span>
       </p>
       <p className="dataline-refresh">
         {auto ? (
-          <span className="muted"><Icon name="refresh" size={14} /> Auto-refresh every {REFRESH_MS / 1000} s</span>
+          <span className="muted">Auto-refresh every {REFRESH_MS / 1000} s</span>
         ) : (
-          <span className="muted"><Icon name="pause" size={14} /> Auto-refresh paused{pausedReason ? `: ${pausedReason}` : ''}</span>
+          <span className="muted">Auto-refresh paused{pausedReason ? `: ${pausedReason}` : ''}</span>
         )}
         <button type="button" className="btn ghost small" onClick={onRefresh} aria-disabled={busy ? 'true' : undefined}>
-          <Icon name="refresh" size={15} /> {busy ? 'Refreshing…' : 'Refresh'}
+          <Icon name="refresh" size={14} /> {busy ? 'Refreshing…' : 'Refresh'}
         </button>
       </p>
     </div>
   )
 }
 
+/** One plain row that points at the key item: the flagged aircraft, or when the next scenario starts. */
 function StartHint({ data, scenarios, onSelect, onDismiss }) {
   const flagged = data.aircraft.filter((a) => a.flagged)
   const pick = flagged.find((a) => a.callsign) || flagged[0]
   const next = data.source === 'recorded' ? nextScenario(scenarios, data.ts) : null
   return (
-    <section className="hint" aria-labelledby="hint-title">
-      <div className="hint-icon" aria-hidden="true"><Icon name="info" size={18} /></div>
-      <div className="hint-body">
-        <h2 id="hint-title">Start here</h2>
-        {pick ? (
-          <p>
-            <strong>{aircraftName(pick)}</strong> is flagged{pick.injected ? ' (injected test data)' : ''}.
-            Select it to see which checks failed, the observed values against their thresholds, and the alert.
-            {flagged.length > 1 && ` ${flagged.length - 1} other aircraft ${flagged.length === 2 ? 'is' : 'are'} flagged too.`}
-          </p>
-        ) : (
-          <p>
-            Nothing is flagged right now.
-            {next && <> The next injected scenario, <strong>{next.scenario.title}</strong>, starts in about {fmtDuration(next.inSeconds)}.</>}
-            {' '}Meanwhile, the <Link to="/alerts">alert queue</Link> holds the last 24 hours.
-          </p>
+    <div className="pointer" role="note">
+      {pick ? (
+        <p>
+          <strong>{aircraftName(pick)}</strong> is flagged{pick.injected ? ' (injected test data)' : ''}.
+          {flagged.length > 1 && ` ${flagged.length - 1} other aircraft ${flagged.length === 2 ? 'is' : 'are'} flagged too.`}
+        </p>
+      ) : (
+        <p>
+          Nothing is flagged right now.
+          {next && <> Next injected scenario: <strong>{next.scenario.title}</strong>, in about {fmtDuration(next.inSeconds)}.</>}
+        </p>
+      )}
+      <span className="pointer-actions">
+        {pick && (
+          <button type="button" className="link" onClick={() => onSelect(pick.icao)}>Show on the map</button>
         )}
-        <div className="hint-actions">
-          {pick && (
-            <button type="button" className="btn primary small" onClick={() => onSelect(pick.icao)}>
-              Show {aircraftName(pick)} <Icon name="arrow" size={15} />
-            </button>
-          )}
-          <Link className="btn secondary small" to="/alerts">Alert queue</Link>
-          <button type="button" className="btn ghost small" onClick={onDismiss}>Dismiss</button>
-        </div>
-      </div>
-    </section>
+        <Link to="/alerts">Alert queue</Link>
+        <button type="button" className="btn ghost small icon-only" onClick={onDismiss}>
+          <Icon name="close" size={14} /><span className="sr-only">Dismiss this note</span>
+        </button>
+      </span>
+    </div>
   )
 }
 
@@ -241,8 +239,7 @@ export default function LiveMap() {
 
   return (
     <div className="page live-page">
-      <PageHead eyebrow="Southern California · 60 NM around LAX" title="Live map"
-        lead="Every aircraft in the picture is run through ten plausibility checks. Aircraft with a medium or higher finding get a red ring (low-severity findings are listed, not ringed); injected test aircraft are hatched and labelled.">
+      <PageHead title="Live map" lead="Southern California, 60 NM around LAX. A ring marks a medium or higher finding; injected test aircraft are hatched and labelled.">
         <ModeToggle mode={mode} onChange={changeMode} />
       </PageHead>
       {mode === 'live' && (
@@ -258,17 +255,25 @@ export default function LiveMap() {
         <>
           {hintOpen && <StartHint data={data} scenarios={scenarios} onSelect={select} onDismiss={dismissHint} />}
           <DataLine data={data} auto={auto} pausedReason={pausedReason} onRefresh={() => !state.busy && refresh()} busy={state.busy} />
-          {data.notice && <p className="notice" role="status"><Icon name="info" size={16} /> {data.notice}</p>}
+          {data.notice && <p className="notice" role="status"><Icon name="info" size={14} /> {data.notice}</p>}
           {state.error && (
             <p className="state error small" role="alert">Refresh failed: {state.error.message}. Showing the last picture.</p>
           )}
           <div className="live-grid">
             <div className="map-col">
-              <RadarMap aircraft={data.aircraft} selected={selected} onSelect={select} trails={trails}
+              <RadarMap aircraft={data.aircraft} selected={selected} onSelect={select} trails={trails} initialView={HOME_VIEW}
                 overlay={wide ? panel : null}
                 summary={data.source === 'live' ? 'LIVE · adsb.lol' : 'REPLAY · recorded'} />
               {!wide && panel}
               <Legend />
+              <details className="about">
+                <summary>About this view</summary>
+                <p>
+                  Every aircraft in the picture is run through ten plausibility checks. Aircraft with a medium or higher
+                  finding get a ring (low-severity findings are listed, not ringed); injected test aircraft are hatched and
+                  labelled. Positions come from decoded ADS-B data; nothing here is transmitted or verified by radio.
+                </p>
+              </details>
             </div>
             <AircraftTable aircraft={data.aircraft} selected={selected} onSelect={select} />
           </div>
