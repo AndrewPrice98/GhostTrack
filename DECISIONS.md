@@ -224,7 +224,7 @@ All routes live under `/api`.
 - **Resolution: 1:10m, not 1:50m.** At 1:50m the 194 x 168 NM map window holds only 77 coastline vertices (visibly angular when zoomed), and admin-1 at 1:50m has no Mexican states, so Baja California had no fill. The files were downloaded on 2026-11-10 from the Natural Earth CDN linked by the site, https://naciscdn.org/naturalearth/ (the `naturalearthdata.com/http//...` download links answered automated requests with a WordPress error page): `ne_10m_coastline` 5.0.0, `ne_10m_land` 5.1.1 and `ne_10m_admin_0_boundary_lines_land` 5.1.0. After clipping to the window and Douglas-Peucker simplification (0.06 NM), the committed `src/assets/basemap-socal.json` is 14 KB. The shapefiles themselves are not committed; only this derived outline is.
 - **Layers:** land polygons (fill), coastline (stroke) and country boundary lines (the US-Mexico border, dashed). State lines are not drawn: inside the window the only one would be the coast-hugging California outline, which duplicates the coastline.
 - **Build:** `backend/scripts/build_basemap.py` uses the standard library only (a minimal .shp reader, Liang-Barsky line clipping, Sutherland-Hodgman polygon clipping).
-- **No external tiles or fonts.** The map is hand-drawn SVG, so no third party sees what a visitor looks at and the CSP allows no other origin.
+- **No external tiles or fonts.** The map is hand-drawn SVG and the typeface (Inter Variable, `@fontsource-variable/inter`) is bundled by Vite and served from the same origin, so no third party sees what a visitor looks at and the CSP allows no other origin.
 
 ## Deployment
 
