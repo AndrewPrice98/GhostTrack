@@ -105,10 +105,14 @@ def cycle_offsets() -> list[float]:
 
 
 def inputs_digest() -> str:
-    """Digest of everything the fixture depends on besides code (the offline check covers code)."""
+    """Digest of everything the fixtures depend on besides code (the offline check covers code).
+
+    It covers every recording in the manifest, not only the demo cycle's three: the false-positive
+    measurement in the API fixture also reads the daytime recordings, so a changed or added one
+    makes the committed fixtures stale (the data routes then answer 503)."""
     h = hashlib.sha256()
     h.update(f"v{FIXTURE_VERSION}".encode())
-    for path in _demo_recordings():
+    for path in manifest_recordings(config.RECORDINGS_DIR):
         h.update(path.name.encode())
         h.update(hashlib.sha256(path.read_bytes()).digest())
     h.update(b"\n".join(CATALOG_PATH.read_bytes().splitlines()))  # same digest on CRLF checkouts
