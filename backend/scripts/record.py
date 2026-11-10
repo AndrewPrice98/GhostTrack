@@ -1,7 +1,8 @@
 """Record an adsb.lol region to backend/data/recordings/<name>.jsonl.gz.
 
-Usage: python scripts/record.py --name socal-a --minutes 20 [--region socal] [--interval 5]
-Polls sequentially (single-threaded), 3 s timeout, exponential back-off on errors.
+Usage: python scripts/record.py --name socal-a --minutes 20 [--region socal] [--interval 10] [--force]
+Polls sequentially (single-threaded) every 10 s by default (5 s floor), 3 s timeout,
+honours Retry-After on HTTP 429, exponential back-off on errors.
 Military-flagged / DoD-block aircraft are excluded before anything is written.
 Data is from adsb.lol under the ODbL; see data/LICENSE-ODbL.md.
 """
@@ -18,8 +19,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ghosttrack.upstream import UpstreamError, fetch_snapshot  # noqa: E402
+from ghosttrack.upstream import REGIONS, UpstreamError, fetch_snapshot  # noqa: E402
 
+MIN_INTERVAL_S = 5.0  # hard floor (tests may go this low)
+DEFAULT_INTERVAL_S = 10.0  # polite default: one request per region per 10 s
+MAX_BACKOFF_S = 60.0
 REC_DIR = Path(__file__).resolve().parents[1] / "data" / "recordings"
 
 
@@ -61,30 +65,54 @@ def update_manifest(rec_dir: Path = REC_DIR) -> list[dict]:
     return entries
 
 
-def record(name: str, minutes: float, region: str, interval: float, rec_dir: Path = REC_DIR) -> Path:
+def next_delay(delay: float, interval: float, exc: UpstreamError) -> float:
+    """Back-off after a failed poll: double up to 60 s; a 429 Retry-After is honoured if longer."""
+    delay = min(delay * 2, MAX_BACKOFF_S)
+    if exc.status == 429 and exc.retry_after is not None:
+        delay = max(delay, exc.retry_after, interval)
+    return delay
+
+
+def record(
+    name: str,
+    minutes: float,
+    region: str,
+    interval: float,
+    rec_dir: Path = REC_DIR,
+    force: bool = False,
+    fetch=fetch_snapshot,
+    sleep=time.sleep,
+) -> Path:
     rec_dir.mkdir(parents=True, exist_ok=True)
     out = rec_dir / f"{name}.jsonl.gz"
     tmp = out.with_suffix(".tmp")
+    if out.exists() and not force:
+        raise FileExistsError(f"{out} exists; pass --force to overwrite")
+    tmp.unlink(missing_ok=True)  # leftover from an interrupted run
     deadline = time.monotonic() + minutes * 60
     delay, last_ts, ok, fail = interval, None, 0, 0
-    with gzip.open(tmp, "wt", encoding="utf-8", compresslevel=9) as f:
-        while time.monotonic() < deadline:
-            t0 = time.monotonic()
-            try:
-                snap, stats = fetch_snapshot(region)
-                delay = interval
-                if snap.ts != last_ts:  # skip duplicate upstream frames
-                    f.write(json.dumps(snap.to_dict(), separators=(",", ":")) + "\n")
-                    last_ts = snap.ts
-                    ok += 1
-                    if ok % 12 == 0:
-                        print(f"{iso(time.time())} {name} ok={ok} fail={fail} kept={stats['records_kept']}", flush=True)
-            except UpstreamError as exc:
-                fail += 1
-                delay = min(delay * 2, 60)
-                print(f"{iso(time.time())} {name} error: {exc}; backoff {delay}s", flush=True)
-            time.sleep(max(0.0, delay - (time.monotonic() - t0)))
-    tmp.replace(out)
+    try:
+        with gzip.open(tmp, "wt", encoding="utf-8", compresslevel=9) as f:
+            while time.monotonic() < deadline:
+                t0 = time.monotonic()
+                try:
+                    snap, stats = fetch(region)
+                    delay = interval
+                    if snap.ts != last_ts:  # skip duplicate upstream frames
+                        f.write(json.dumps(snap.to_dict(), separators=(",", ":")) + "\n")
+                        last_ts = snap.ts
+                        ok += 1
+                        if ok % 12 == 0:
+                            print(f"{iso(time.time())} {name} ok={ok} fail={fail} kept={stats['records_kept']}", flush=True)
+                except UpstreamError as exc:
+                    fail += 1
+                    delay = next_delay(delay, interval, exc)
+                    print(f"{iso(time.time())} {name} error: {exc}; backoff {delay}s", flush=True)
+                sleep(max(0.0, delay - (time.monotonic() - t0)))
+        tmp.replace(out)
+    except BaseException:  # includes KeyboardInterrupt: never leave a partial .tmp behind
+        tmp.unlink(missing_ok=True)
+        raise
     print(f"done {name}: {ok} snapshots, {fail} failures", flush=True)
     return out
 
@@ -93,8 +121,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--name")
     ap.add_argument("--minutes", type=float, default=20)
-    ap.add_argument("--region", default="socal")
-    ap.add_argument("--interval", type=float, default=5.0)
+    ap.add_argument("--region", default="socal", choices=sorted(REGIONS))
+    ap.add_argument("--interval", type=float, default=DEFAULT_INTERVAL_S)
+    ap.add_argument("--force", action="store_true", help="overwrite an existing recording")
     ap.add_argument("--manifest-only", action="store_true")
     a = ap.parse_args(argv)
     if a.manifest_only:
@@ -102,9 +131,15 @@ def main(argv=None) -> int:
         return 0
     if not a.name or not a.name.replace("-", "").replace("_", "").isalnum():
         ap.error("--name required (alphanumeric, - and _)")
-    if a.interval < 5:
-        ap.error("interval must be >= 5 s")
-    record(a.name, a.minutes, a.region, a.interval)
+    if a.interval < MIN_INTERVAL_S:
+        ap.error(f"interval must be >= {MIN_INTERVAL_S:g} s")
+    try:
+        record(a.name, a.minutes, a.region, a.interval, force=a.force)
+    except FileExistsError as exc:
+        ap.error(str(exc))
+    except KeyboardInterrupt:
+        print("interrupted; partial recording discarded", flush=True)
+        return 130
     update_manifest()
     return 0
 

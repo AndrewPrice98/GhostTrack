@@ -96,7 +96,7 @@ def test_hostile_upstream_records():
         rec(hex="a0000c"), rec(hex="a0000c"),       # duplicate
         rec(hex="a0000d", gs=-5, track=720, nic=99, rssi=1e400),
     ]
-    snap, stats = parse_response(body(*hostile).replace(b"nan", b"NaN"))
+    snap, stats = parse_response(body(*hostile))
     kept = {a.icao: a for a in snap.aircraft}
     assert stats["records_in"] == len(hostile)
     assert stats["records_kept"] == len(snap.aircraft)

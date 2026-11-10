@@ -10,8 +10,10 @@ import json
 import math
 import re
 import time
+import urllib.error
 import urllib.request
 from collections import Counter
+from urllib.parse import urlsplit
 from typing import Callable
 
 from ghosttrack.model import Snapshot, State
@@ -19,7 +21,9 @@ from ghosttrack.model import Snapshot, State
 HOST = "api.adsb.lol"
 BASE_URL = "https://" + HOST
 PATH_TEMPLATE = "/v2/point/{lat:.4f}/{lon:.4f}/{radius:d}"
-TIMEOUT_S = 3.0
+TIMEOUT_S = 3.0  # per socket operation (connect / each recv)
+TOTAL_DEADLINE_S = 8.0  # wall-clock cap for the whole body read (defeats slow-drip responses)
+MAX_RETRY_AFTER_S = 120.0
 MAX_BODY_BYTES = 5 * 1024 * 1024
 MAX_RADIUS_NM = 250
 USER_AGENT = "GhostTrack/0.1 (non-commercial portfolio demo; read-only)"
@@ -41,20 +45,67 @@ DBFLAG_MILITARY = 1
 
 
 class UpstreamError(Exception):
-    """Fetch or envelope failure (network, size, non-JSON, wrong shape)."""
+    """Fetch or envelope failure (network, size, non-JSON, wrong shape).
+
+    ``status`` is the HTTP status when there was one (429, 5xx, a refused 3xx);
+    ``retry_after`` is the parsed Retry-After in seconds (capped) or None.
+    """
+
+    def __init__(self, message: str, status: int | None = None, retry_after: float | None = None):
+        super().__init__(message)
+        self.status = status
+        self.retry_after = retry_after
 
 
-def build_url(region: str) -> str:
+def _parse_retry_after(value) -> float | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        secs = float(value.strip())
+    except ValueError:
+        return None  # HTTP-date form is ignored; the recorder's own back-off applies
+    if not math.isfinite(secs) or secs < 0:
+        return None
+    return min(secs, MAX_RETRY_AFTER_S)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect: the only host we may contact is api.adsb.lol."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise UpstreamError(f"redirect refused (HTTP {code})", status=code)
+
+
+def make_opener(allow_http: bool = False) -> urllib.request.OpenerDirector:
+    """Dedicated opener: no proxies from the environment, no redirects, HTTPS only.
+
+    ``allow_http`` exists solely so tests can reach a 127.0.0.1 server; production
+    code never sets it.
+    """
+    op = urllib.request.OpenerDirector()
+    op.add_handler(urllib.request.ProxyHandler({}))  # ignore HTTPS_PROXY / HTTP_PROXY
+    op.add_handler(urllib.request.HTTPSHandler())
+    if allow_http:
+        op.add_handler(urllib.request.HTTPHandler())
+    op.add_handler(_NoRedirect())
+    op.add_handler(urllib.request.HTTPDefaultErrorHandler())
+    op.add_handler(urllib.request.HTTPErrorProcessor())
+    return op
+
+
+def build_url(region: str, _base_url: str | None = None) -> str:
+    """Region URL. ``_base_url`` is test-only; nothing in the app or config passes it."""
     if region not in REGIONS:
         raise ValueError(f"unknown region {region!r}")
     lat, lon, radius = REGIONS[region]
     radius = int(radius)
     if not (0 < radius <= MAX_RADIUS_NM and -90 <= lat <= 90 and -180 <= lon <= 180):
         raise ValueError("region parameters out of range")
-    return BASE_URL + PATH_TEMPLATE.format(lat=float(lat), lon=float(lon), radius=radius)
+    return (_base_url or BASE_URL) + PATH_TEMPLATE.format(lat=float(lat), lon=float(lon), radius=radius)
 
 
-def _read_capped(resp, limit: int = MAX_BODY_BYTES) -> bytes:
+def _read_capped(resp, limit: int = MAX_BODY_BYTES, deadline_s: float | None = None) -> bytes:
+    deadline = time.monotonic() + (TOTAL_DEADLINE_S if deadline_s is None else deadline_s)
     headers = getattr(resp, "headers", None)
     declared = headers.get("Content-Length") if headers is not None else None
     if declared is not None:
@@ -63,24 +114,30 @@ def _read_capped(resp, limit: int = MAX_BODY_BYTES) -> bytes:
                 raise UpstreamError("body too large")
         except ValueError:
             pass
+    read = getattr(resp, "read1", None) or resp.read  # read1 returns as soon as data arrives
     chunks, total = [], 0
     while True:
-        chunk = resp.read(65536)
+        chunk = read(65536)
         if not chunk:
             break
         total += len(chunk)
         if total > limit:
             raise UpstreamError("body too large")
         chunks.append(chunk)
+        if time.monotonic() > deadline:
+            raise UpstreamError("timeout: total read deadline exceeded")
     return b"".join(chunks)
 
 
-def fetch_raw(region: str, opener: Callable | None = None) -> bytes:
-    url = build_url(region)
+def fetch_raw(region: str, opener: Callable | None = None, *, _base_url: str | None = None) -> bytes:
+    url = build_url(region, _base_url)
+    parts = urlsplit(url)
+    if _base_url is None and not (parts.scheme == "https" and parts.hostname == HOST and parts.port is None):
+        raise UpstreamError("refusing to fetch from a non-allow-listed URL")
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-    opener = opener or urllib.request.urlopen
+    open_ = opener or make_opener(allow_http=_base_url is not None).open
     try:
-        resp = opener(req, timeout=TIMEOUT_S)
+        resp = open_(req, timeout=TIMEOUT_S)
         try:
             return _read_capped(resp)
         finally:
@@ -89,8 +146,15 @@ def fetch_raw(region: str, opener: Callable | None = None) -> bytes:
                 close()
     except UpstreamError:
         raise
-    except Exception as exc:  # network, timeout, HTTP error
-        raise UpstreamError(f"fetch failed: {type(exc).__name__}") from exc
+    except urllib.error.HTTPError as exc:
+        ra = _parse_retry_after(exc.headers.get("Retry-After") if exc.headers is not None else None)
+        raise UpstreamError(f"HTTP {exc.code}", status=exc.code, retry_after=ra) from exc
+    except TimeoutError as exc:
+        raise UpstreamError("timeout") from exc
+    except Exception as exc:  # network error, TLS failure, bad status line, ...
+        reason = getattr(exc, "reason", None)
+        kind = "timeout" if isinstance(reason, TimeoutError) else type(exc).__name__
+        raise UpstreamError(f"fetch failed: {kind}") from exc
 
 
 def _num(v, lo: float, hi: float) -> float | None:
@@ -119,7 +183,7 @@ def _source(rec: dict) -> str:
         return "mlat"
     if t.startswith("tisb") or (isinstance(tisb, list) and "lat" in tisb):
         return "tisb"
-    if t in ("adsb_icao", "adsb_icao_nt", "adsr_icao"):
+    if t in ("adsb_icao", "adsb_icao_nt", "adsr_icao"):  # *_other types (non-ICAO address) stay "other"
         return "adsb"
     return "other"
 
@@ -215,6 +279,7 @@ def parse_response(body: bytes, fallback_ts: float | None = None) -> tuple[Snaps
     if not isinstance(data, dict) or not isinstance(data.get("ac"), list):
         raise UpstreamError("response envelope missing 'ac' list")
     now_ms = _num(data.get("now"), 0, 4e12)  # adsb.lol 'now' is epoch MILLISECONDS
+    # Bounds (1970..~2096 in ms) only reject garbage like negative or 1e18 values; ts is untrusted.
     if now_ms is not None:
         ts = now_ms / 1000.0
     else:
@@ -238,5 +303,7 @@ def parse_response(body: bytes, fallback_ts: float | None = None) -> tuple[Snaps
     }
 
 
-def fetch_snapshot(region: str = "socal", opener: Callable | None = None) -> tuple[Snapshot, dict]:
-    return parse_response(fetch_raw(region, opener))
+def fetch_snapshot(
+    region: str = "socal", opener: Callable | None = None, *, _base_url: str | None = None
+) -> tuple[Snapshot, dict]:
+    return parse_response(fetch_raw(region, opener, _base_url=_base_url))
