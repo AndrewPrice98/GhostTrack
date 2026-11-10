@@ -95,3 +95,19 @@ def live_interval_s() -> float:
     except ValueError:
         value = MIN_LIVE_INTERVAL_S
     return max(MIN_LIVE_INTERVAL_S, value)
+
+
+def max_upload_bytes() -> int:
+    """Largest accepted upload: 10 MB locally, at most 4 MB on the hosted demo."""
+    try:
+        mb = float(os.environ.get("GHOSTTRACK_MAX_UPLOAD_MB", "10"))
+    except ValueError:
+        mb = 10.0
+    if demo_mode():
+        mb = min(mb, 4.0)
+    return int(max(0.1, mb) * 1024 * 1024)
+
+
+def max_decompressed_bytes() -> int:
+    """Cap on what a gzip upload may expand to (a gzip bomb is refused, not inflated)."""
+    return 4 * max_upload_bytes()

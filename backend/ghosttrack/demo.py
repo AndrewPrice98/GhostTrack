@@ -287,13 +287,16 @@ def catch_up(
         failed = _last_fail.get(region)
         if throttle_seconds and failed is not None and mono - failed < RETRY_AFTER_FAILURE_S:
             return 0
-        conn.commit()  # no transaction may be open when taking the write lock
-        conn.execute("BEGIN IMMEDIATE")
         try:
+            conn.commit()  # no transaction may be open when taking the write lock
+            conn.execute("BEGIN IMMEDIATE")
             stored = _stamp(conn, now_ts, region)
             conn.commit()
         except BaseException as exc:
-            conn.rollback()
+            try:
+                conn.rollback()
+            except Exception:  # a broken connection must not mask the original error
+                pass
             _last_fail[region] = mono
             if mono - _last_fail_log.get(region, -FAILURE_LOG_WINDOW_S) >= FAILURE_LOG_WINDOW_S:
                 _last_fail_log[region] = mono

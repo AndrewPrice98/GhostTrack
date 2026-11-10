@@ -1,4 +1,4 @@
-"""Command-line entry point: ``python -m ghosttrack validate`` (serve and data tooling come later)."""
+"""Command-line entry point: validate, create-admin, serve and demo."""
 from __future__ import annotations
 
 import argparse
@@ -50,6 +50,18 @@ def cmd_create_admin(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    import os
+
+    import uvicorn
+
+    if args.command == "demo":  # hosted-demo behaviour, locally: replay, read-only guests
+        os.environ.setdefault("GHOSTTRACK_DEMO", "true")
+        os.environ.setdefault("GHOSTTRACK_COOKIE_SECURE", "false")
+    uvicorn.run("ghosttrack.api:app", host=args.host, port=args.port, log_level="info")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ghosttrack")
     sub = ap.add_subparsers(dest="command", required=True)
@@ -57,11 +69,17 @@ def main(argv: list[str] | None = None) -> int:
     admin = sub.add_parser("create-admin", help="print the admin login environment variables")
     admin.add_argument("--username", default="admin")
     admin.add_argument("--password-stdin", action="store_true", help="read the password from stdin")
+    for name, text in (("serve", "run the API"), ("demo", "run the API in demo mode (replay, read-only guests)")):
+        p = sub.add_parser(name, help=text)
+        p.add_argument("--host", default="127.0.0.1")
+        p.add_argument("--port", type=int, default=8000)
     args = ap.parse_args(argv)
     if args.command == "validate":
         return cmd_validate()
     if args.command == "create-admin":
         return cmd_create_admin(args)
+    if args.command in ("serve", "demo"):
+        return cmd_serve(args)
     return 2
 
 

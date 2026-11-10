@@ -32,6 +32,7 @@ STORAGE_NOTICE = "Storage unavailable; showing recorded traffic"
 LOADING_NOTICE = "Loading live data; showing recorded traffic"
 MAX_UPSTREAM_SKEW_S = 300.0  # an upstream "now" further than this from our clock is not trusted
 MODES = ("recorded", "live")
+REPLAY_MAX_AGE_S = 30.0  # a stored replay snapshot older than this (about 3 intervals) is not trusted
 STALE_WHILE_REVALIDATE_S = 30.0  # matches the stale-while-revalidate in CACHE_CONTROL
 
 
@@ -170,6 +171,10 @@ def traffic_view(
             raise sqlite3.OperationalError("no database connection")
         demo.catch_up(conn, now_ts, region=region)
         replay = demo.recorded_snapshot(conn, now_ts, region)
+        if replay is None or now_ts - replay.ts > REPLAY_MAX_AGE_S:
+            # Nothing stored, or the catch-up has been failing: do not show a stale picture.
+            replay = demo.cycle_snapshot_at(now_ts)
+            notice = STORAGE_NOTICE
     except (sqlite3.Error, OSError):
         # The database is unusable (read-only or missing /tmp, locked, corrupt): the replay is a
         # pure function of the clock, so serve it straight from the in-memory cycle.

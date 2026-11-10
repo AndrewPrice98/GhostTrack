@@ -22,20 +22,10 @@ from typing import Any, Iterable
 from ghosttrack import config
 from ghosttrack.model import Snapshot
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS snapshots (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    source    TEXT NOT NULL CHECK (source IN ('recorded','live')),
-    region    TEXT NOT NULL,
-    ts        REAL NOT NULL,
-    data_json TEXT NOT NULL,
-    UNIQUE (source, region, ts)
-);
-
-CREATE TABLE IF NOT EXISTS alerts (
+ALERTS_DDL = """CREATE TABLE IF NOT EXISTS alerts (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     fingerprint    TEXT NOT NULL UNIQUE,
-    source         TEXT NOT NULL CHECK (source IN ('recorded','live')),
+    source         TEXT NOT NULL CHECK (source IN ('recorded','live','upload')),
     detection_id   TEXT NOT NULL,
     severity       TEXT NOT NULL CHECK (severity IN ('info','low','medium','high')),
     icao           TEXT,
@@ -50,9 +40,27 @@ CREATE TABLE IF NOT EXISTS alerts (
     status         TEXT NOT NULL DEFAULT 'new'
                    CHECK (status IN ('new','info','acknowledged','dismissed')),
     notes          TEXT NOT NULL DEFAULT ''
+);"""
+
+SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS snapshots (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    source    TEXT NOT NULL CHECK (source IN ('recorded','live')),
+    region    TEXT NOT NULL,
+    ts        REAL NOT NULL,
+    data_json TEXT NOT NULL,
+    UNIQUE (source, region, ts)
 );
+
+{ALERTS_DDL}
 CREATE INDEX IF NOT EXISTS idx_alerts_last   ON alerts(last_ts);
 CREATE INDEX IF NOT EXISTS idx_alerts_match  ON alerts(source, detection_id, icao);
+
+-- Track points kept with an uploaded recording's alerts (its snapshots are not stored).
+CREATE TABLE IF NOT EXISTS alert_tracks (
+    alert_id    INTEGER PRIMARY KEY,
+    points_json TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS runs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,6 +80,13 @@ BUSY_TIMEOUT_SECONDS = 15.0
 FINGERPRINT_BUCKET_S = 300.0  # episodes starting in the same 5-minute bucket share a fingerprint
 MERGE_GAP_S = 120.0  # same detection and address within this gap of an existing alert: same episode
 MAX_RUNS = 50
+MAX_UPLOAD_ALERTS = 500  # newest uploaded alerts kept
+SORTS = {  # allow-listed ORDER BY clauses; nothing from a request reaches the SQL text
+    "first_ts": "first_ts DESC, id DESC",
+    "last_ts": "last_ts DESC, id DESC",
+    "severity": "CASE severity WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END DESC, first_ts DESC, id DESC",
+    "confidence": "confidence DESC, id DESC",
+}
 SEVERITIES = ("info", "low", "medium", "high")
 TRIAGE_SEVERITIES = ("medium", "high")  # these start as "new"; the rest are "info"
 
@@ -88,7 +103,32 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     _use_wal(conn)
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Databases made before uploads existed only allow the 'recorded' and 'live' alert sources;
+    rebuild the alerts table once so 'upload' is accepted (rows are kept)."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'alerts'").fetchone()
+    if row is None or "'upload'" in row[0]:
+        return
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("ALTER TABLE alerts RENAME TO alerts_old")
+        conn.execute("DROP INDEX IF EXISTS idx_alerts_last")
+        conn.execute("DROP INDEX IF EXISTS idx_alerts_match")
+        conn.execute("DROP TABLE IF EXISTS alerts_new")
+        conn.execute(ALERTS_DDL)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_last ON alerts(last_ts)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_match ON alerts(source, detection_id, icao)")
+        conn.execute("INSERT INTO alerts SELECT * FROM alerts_old")
+        conn.execute("DROP TABLE alerts_old")
+        conn.commit()
+    except BaseException:
+        conn.rollback()
+        raise
 
 
 def _use_wal(conn: sqlite3.Connection) -> None:
@@ -174,7 +214,13 @@ def _members(evidence: list[dict]) -> set[str]:
 
 
 def upsert_alert(conn: sqlite3.Connection, row: dict[str, Any], *, commit: bool = True) -> str:
-    """Insert an alert, or extend the one it continues. Returns "inserted" or "updated".
+    """Insert an alert, or extend the one it continues. Returns "inserted" or "updated"
+    (``upsert_alert_id`` also returns the row's id)."""
+    return upsert_alert_id(conn, row, commit=commit)[0]
+
+
+def upsert_alert_id(conn: sqlite3.Connection, row: dict[str, Any], *, commit: bool = True) -> tuple[str, int]:
+    """``upsert_alert`` that also returns the id of the alert inserted or extended.
 
     ``row`` keys: source, detection_id, severity, icao, callsign, first_ts, last_ts, injected,
     confidence, explanation, benign_causes, evidence. Identity is the fingerprint (detection,
@@ -216,6 +262,7 @@ def upsert_alert(conn: sqlite3.Connection, row: dict[str, Any], *, commit: bool 
              row["explanation"], benign, evidence, default_status(row["severity"])),
         )
         result = "inserted"
+        alert_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
     else:
         severity = max(existing["severity"], row["severity"], key=SEVERITIES.index)
         # An alert that grows from below the triage level into it becomes "new"; a status the
@@ -229,9 +276,10 @@ def upsert_alert(conn: sqlite3.Connection, row: dict[str, Any], *, commit: bool 
              row["callsign"], row["explanation"], benign, evidence, existing["id"]),
         )
         result = "updated"
+        alert_id = int(existing["id"])
     if commit:
         conn.commit()
-    return result
+    return result, alert_id
 
 
 def list_alerts(
@@ -251,14 +299,124 @@ def list_alerts(
         sql += " AND status = ?"
         args.append(status)
     sql += " ORDER BY first_ts DESC, id DESC"
-    out = []
-    for r in conn.execute(sql, args).fetchall():
-        d = dict(r)
-        d["injected"] = bool(d["injected"])
-        d["benign_causes"] = json.loads(d.pop("benign_json"))
-        d["evidence"] = json.loads(d.pop("evidence_json"))
-        out.append(d)
-    return out
+    return [_alert_dict(r) for r in conn.execute(sql, args).fetchall()]
+
+
+def _alert_dict(r: sqlite3.Row) -> dict:
+    d = dict(r)
+    d["injected"] = bool(d["injected"])
+    d["benign_causes"] = json.loads(d.pop("benign_json"))
+    d["evidence"] = json.loads(d.pop("evidence_json"))
+    return d
+
+
+def get_alert(conn: sqlite3.Connection, alert_id: int) -> dict | None:
+    r = conn.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+    return _alert_dict(r) if r else None
+
+
+def query_alerts(
+    conn: sqlite3.Connection,
+    *,
+    detection: str | None = None,
+    severity: str | None = None,
+    injected: bool | None = None,
+    status: str | None = None,
+    icao: str | None = None,
+    start_ts: float | None = None,
+    end_ts: float | None = None,
+    sort: str = "first_ts",
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Filtered, sorted page of alerts and the total count. Every value is a bound parameter;
+    ``sort`` must be a key of ``SORTS``."""
+    where: list[str] = ["1=1"]
+    args: list[Any] = []
+    for col, val in (("detection_id", detection), ("severity", severity), ("status", status), ("icao", icao)):
+        if val is not None:
+            where.append(f"{col} = ?")
+            args.append(val)
+    if injected is not None:
+        where.append("injected = ?")
+        args.append(int(injected))
+    if start_ts is not None:  # the alert overlaps [start, end]
+        where.append("last_ts >= ?")
+        args.append(start_ts)
+    if end_ts is not None:
+        where.append("first_ts <= ?")
+        args.append(end_ts)
+    clause = " AND ".join(where)
+    total = conn.execute(f"SELECT COUNT(*) FROM alerts WHERE {clause}", args).fetchone()[0]
+    rows = conn.execute(
+        f"SELECT * FROM alerts WHERE {clause} ORDER BY {SORTS[sort]} LIMIT ? OFFSET ?", [*args, limit, offset]
+    ).fetchall()
+    return [_alert_dict(r) for r in rows], total
+
+
+def flagged_alerts(conn: sqlite3.Connection, since_ts: float) -> list[dict]:
+    """Alerts touching ``since_ts`` or later that are not dismissed (for marking aircraft)."""
+    rows = conn.execute(
+        "SELECT * FROM alerts WHERE last_ts >= ? AND status != 'dismissed' AND source IN ('recorded','live') "
+        "ORDER BY id", (since_ts,)).fetchall()
+    return [_alert_dict(r) for r in rows]
+
+
+def store_alert_track(conn: sqlite3.Connection, alert_id: int, points: list[dict], *, commit: bool = True) -> None:
+    conn.execute(
+        "INSERT INTO alert_tracks (alert_id, points_json) VALUES (?, ?) "
+        "ON CONFLICT(alert_id) DO UPDATE SET points_json = excluded.points_json",
+        (alert_id, json.dumps(points, separators=(",", ":"))))
+    if commit:
+        conn.commit()
+
+
+def alert_members(alert: dict) -> set[str]:
+    members = {alert["icao"]} if alert.get("icao") else set()
+    if not members:
+        for e in alert["evidence"]:
+            if e.get("field") == "addresses" and isinstance(e.get("observed"), list):
+                members.update(str(a) for a in e["observed"])
+    return members
+
+
+def alert_track(conn: sqlite3.Connection, alert: dict, pad_s: float = 120.0, limit: int = 600) -> list[dict]:
+    """Track points behind an alert: kept with the alert (uploads) or read from the stored
+    window. Old alerts outlive the 30-minute window, so this may be empty."""
+    r = conn.execute("SELECT points_json FROM alert_tracks WHERE alert_id = ?", (alert["id"],)).fetchone()
+    if r:
+        return json.loads(r["points_json"])[:limit]
+    members = alert_members(alert)
+    out: list[dict] = []
+    if not members:
+        return out
+    for row in conn.execute(
+        "SELECT data_json FROM snapshots WHERE ts >= ? AND ts <= ? ORDER BY ts",
+        (alert["first_ts"] - pad_s, alert["last_ts"] + pad_s),
+    ).fetchall():
+        d = json.loads(row["data_json"])
+        for a in d["aircraft"]:
+            if a.get("icao") in members:
+                out.append({"ts": d["ts"], **a})
+        if len(out) >= limit:
+            break
+    return out[:limit]
+
+
+def aircraft_track(conn: sqlite3.Connection, icao: str, limit: int = 400) -> list[dict]:
+    """The stored window's points for one address (``icao`` must already be validated 6-hex)."""
+    best: dict[str, list[dict]] = {}
+    for row in conn.execute(
+        "SELECT source, data_json FROM snapshots WHERE instr(data_json, ?) > 0 ORDER BY ts", (f'"icao":"{icao}"',)
+    ).fetchall():
+        d = json.loads(row["data_json"])
+        for a in d["aircraft"]:
+            if a.get("icao") == icao:
+                best.setdefault(row["source"], []).append({"ts": d["ts"], **a})
+    if not best:
+        return []
+    src = max(best, key=lambda k: best[k][-1]["ts"])  # the source that saw it most recently
+    return best[src][-limit:]
 
 
 def set_alert_triage(conn: sqlite3.Connection, alert_id: int, status: str, notes: str | None = None) -> bool:
@@ -279,7 +437,19 @@ def prune(
     commit: bool = True,
 ) -> None:
     conn.execute("DELETE FROM snapshots WHERE ts <= ?", (now_ts - window_minutes * 60.0,))
-    conn.execute("DELETE FROM alerts WHERE last_ts < ?", (now_ts - alert_hours * 3600.0,))
+    # Uploaded recordings are the user's own data, kept regardless of their timestamps (but capped).
+    conn.execute("DELETE FROM alerts WHERE source != 'upload' AND last_ts < ?", (now_ts - alert_hours * 3600.0,))
+    prune_uploads(conn, commit=False)
+    if commit:
+        conn.commit()
+
+
+def prune_uploads(conn: sqlite3.Connection, *, commit: bool = True) -> None:
+    """Keep the newest ``MAX_UPLOAD_ALERTS`` uploaded alerts and drop orphaned track rows."""
+    conn.execute(
+        "DELETE FROM alerts WHERE source = 'upload' AND id NOT IN "
+        "(SELECT id FROM alerts WHERE source = 'upload' ORDER BY id DESC LIMIT ?)", (MAX_UPLOAD_ALERTS,))
+    conn.execute("DELETE FROM alert_tracks WHERE alert_id NOT IN (SELECT id FROM alerts)")
     if commit:
         conn.commit()
 

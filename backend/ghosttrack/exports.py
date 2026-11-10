@@ -25,7 +25,7 @@ LICENCE_REF = "opendatacommons.org/licenses/odbl/1-0/"
 ATTRIBUTION = "ADS-B data from adsb.lol, available under the Open Database License (ODbL) 1.0."
 DISCLAIMER = "Plausibility analysis of decoded ADS-B data; not a certified surveillance system."
 INJECTED_BANNER = "INJECTED TEST DATA \u2014 not real air traffic"
-SOURCE_LABELS = {"recorded": "recorded capture (demo replay)", "live": "live feed"}
+SOURCE_LABELS = {"recorded": "recorded capture (demo replay)", "live": "live feed", "upload": "uploaded recording"}
 SUMMARY_WINDOW_S = 24 * 3600.0
 
 def _unit(field: str) -> str:
