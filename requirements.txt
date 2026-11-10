@@ -1,0 +1,6 @@
+# Python dependencies for the Vercel function in api/index.py.
+# (Local development uses backend/requirements.txt and backend/requirements-dev.txt.)
+fastapi>=0.115
+pyyaml>=6.0
+python-multipart>=0.0.9
+pyjwt>=2.8

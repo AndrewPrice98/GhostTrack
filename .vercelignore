@@ -1,0 +1,14 @@
+# Keep local-only and non-runtime files out of Vercel uploads (git deploys already skip
+# git-ignored files). backend/data stays: the recordings, the fixtures and the licence are read at runtime.
+backend/.venv
+backend/.env
+backend/data/*.db
+backend/data/*.db-*
+backend/tests
+backend/scripts
+**/__pycache__
+.pytest_cache
+node_modules
+dist
+docs
+.github

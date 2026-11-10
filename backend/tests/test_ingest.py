@@ -234,3 +234,22 @@ def test_committed_recordings_are_clean():
 def test_license_notice_present():
     text = (REC_DIR.parent / "LICENSE-ODbL.md").read_text(encoding="utf-8")
     assert "adsb.lol" in text and "Open Database License" in text
+
+
+def test_committed_manifest_matches_the_recordings():
+    assert recmod.check_manifest(REC_DIR) == []
+
+
+def test_manifest_check_names_the_problem(tmp_path):
+    import shutil
+    for p in REC_DIR.glob("*"):
+        shutil.copy(p, tmp_path / p.name)
+    assert recmod.check_manifest(tmp_path) == []
+    extra = tmp_path / "socal-z.jsonl.gz"
+    shutil.copy(tmp_path / "socal-a.jsonl.gz", extra)
+    assert any("socal-z.jsonl.gz: on disk but not in the manifest" in m for m in recmod.check_manifest(tmp_path))
+    extra.unlink()
+    (tmp_path / "socal-b.jsonl.gz").write_bytes((tmp_path / "socal-a.jsonl.gz").read_bytes())
+    assert any("socal-b.jsonl.gz: manifest entry differs" in m for m in recmod.check_manifest(tmp_path))
+    (tmp_path / "manifest.json").write_text("not json")
+    assert "unreadable" in recmod.check_manifest(tmp_path)[0]

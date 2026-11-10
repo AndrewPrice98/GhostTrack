@@ -65,6 +65,25 @@ def update_manifest(rec_dir: Path = REC_DIR) -> list[dict]:
     return entries
 
 
+def check_manifest(rec_dir: Path = REC_DIR) -> list[str]:
+    """Problems found comparing manifest.json with the recordings on disk (empty list: it matches)."""
+    path = rec_dir / "manifest.json"
+    try:
+        have = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return [f"manifest.json unreadable: {exc}"]
+    want = [summarize(p) for p in sorted(rec_dir.glob("*.jsonl.gz"))]
+    if have == want:
+        return []
+    names = {m.get("name") for m in have}, {m["name"] for m in want}
+    problems = [f"{n}: in the manifest but not on disk" for n in sorted(names[0] - names[1], key=str)]
+    problems += [f"{n}: on disk but not in the manifest" for n in sorted(names[1] - names[0])]
+    by_name = {m.get("name"): m for m in have}
+    problems += [f"{w['name']}: manifest entry differs from the file (count, aircraft, times or sha256)"
+                 for w in want if w["name"] in by_name and by_name[w["name"]] != w]
+    return problems or ["manifest.json differs from the recordings"]
+
+
 def next_delay(delay: float, interval: float, exc: UpstreamError) -> float:
     """Back-off after a failed poll: double up to 60 s; a 429 Retry-After is honoured if longer."""
     delay = min(delay * 2, MAX_BACKOFF_S)
@@ -125,7 +144,14 @@ def main(argv=None) -> int:
     ap.add_argument("--interval", type=float, default=DEFAULT_INTERVAL_S)
     ap.add_argument("--force", action="store_true", help="overwrite an existing recording")
     ap.add_argument("--manifest-only", action="store_true")
+    ap.add_argument("--check-manifest", action="store_true", help="exit 1 if manifest.json does not match the recordings (CI)")
     a = ap.parse_args(argv)
+    if a.check_manifest:
+        problems = check_manifest()
+        for line in problems:
+            print(line, file=sys.stderr)
+        print("manifest matches the recordings" if not problems else "manifest is out of date: run record.py --manifest-only")
+        return 1 if problems else 0
     if a.manifest_only:
         update_manifest()
         return 0
