@@ -32,7 +32,7 @@ def test_html_structure():
     out = exports.evidence_html(make_alert(), pts(), now=NOW).decode()
     assert out.startswith("<!DOCTYPE html>")
     assert "<script" not in out.lower() and "javascript:" not in out
-    for needle in ("GT-001", "a061d9", "TEST1", "gs_kt", "912.5", "650", "kt", "UTC", "Possible benign causes",
+    for needle in ("GT-001", "a061d9", "TEST1", "gs_kt", "912.5", "650", "UTC", "Possible benign causes",
                    "Wrong emitter category", "Track points", exports.DISCLAIMER, "<svg", "<style>"):
         assert needle in out
     assert "http" not in out.replace("http://www.w3.org/2000/svg", "")  # no external resources
@@ -86,7 +86,7 @@ def test_summary_escapes_and_counts():
     assert "<script" not in h.lower() and "spoof&lt;script&gt;" in h and "a&amp;b.gz" in h
     assert "2 alerts: 1 from real/recorded traffic, 1 from" in h  # the 2-day-old alert is excluded
     md = exports.summary_report_md(alerts, val, fp, gap, now=NOW)
-    assert "| GT-001 |" in md and "GAP HOLDS" in md and "PASS" in md and "0.67" in md
+    assert r"| GT\-001 |" in md and "Not detected (known blind spot)" in md and "PASS" in md and r"0\.67" in md
 
 
 def test_deterministic():
@@ -100,3 +100,102 @@ def test_deterministic():
 def test_no_points_and_unknown_detection():
     out = exports.evidence_html(make_alert(detection_id="GT-999", evidence=[]), [], now=NOW).decode()
     assert "No track points" in out and "GT-999" in out
+
+
+def _run_all_findings():
+    from ghosttrack.detections import Context, analyse
+    from ghosttrack.scenarios import GAP_SCENARIOS, SCENARIOS
+    from ghosttrack.validate import DEFAULT_RECORDING, RECORDINGS_DIR, load_recording
+    snaps = load_recording(RECORDINGS_DIR / DEFAULT_RECORDING)
+    out = []
+    for sc in [*SCENARIOS, *GAP_SCENARIOS]:
+        out += analyse(sc.apply(snaps).snapshots, Context()).findings
+    return out
+
+
+NO_UNIT = {"new_addresses", "nic", "nac_p"}
+
+
+def test_units_over_real_emitted_evidence():
+    seen = {}
+    for f in _run_all_findings():
+        for e in f.evidence:
+            seen.setdefault(e.field, e)
+    assert len(seen) >= 8
+    for name, e in seen.items():
+        numeric = isinstance(e.observed, (int, float)) and not isinstance(e.observed, bool)
+        unit = exports._unit(name)
+        if numeric and name not in NO_UNIT:
+            assert unit, f"numeric evidence field {name} has no unit"
+        if not numeric or name in NO_UNIT:
+            assert unit == "", name
+    assert exports._unit("gs_kt") == "kt" and exports._unit("icao") == "" and exports._unit("squawk") == ""
+
+
+def test_markdown_hostile_names():
+    names = ["<img src=x onerror=alert(1)>", "[x](javascript:alert(1))", "a`b`c", "p|q|r", "line1\r\nline2", "*_#"]
+    val = [ValidationResult(n, ("GT-001",), ("GT-001",), True, 1.0) for n in names]
+    fp = [RecordingFP(n, 1.0, 1, {("GT-001", "high"): 1}, 1) for n in names]
+    md = exports.summary_report_md([make_alert()], val, fp, [], now=NOW)
+    assert "<img" not in md and "&lt;img" in md
+    assert "](javascript" not in md and "\\[x\\]\\(javascript" in md
+    assert "a\\`b\\`c" in md and "p\\|q\\|r" in md and "\r" not in md
+    for line in md.split("\n"):
+        if "p\\|q" in line:  # escaped pipes must not add columns
+            assert line.replace("\\|", "").count("|") == 6 or line.replace("\\|", "").count("|") == 8
+
+
+def test_fp_verdicts_and_gap_wording():
+    fp = [RecordingFP("ok.gz", 10.0, 5, {}, 0), RecordingFP("bad.gz", 1.0, 5, {("GT-001", "high"): 5}, 5)]
+    gaps = [ValidationResult("g1", (), (), True, None, gap=True),
+            ValidationResult("g2", (), ("GT-004",), False, None, gap=True)]
+    h = exports.summary_report_html([], [], fp, gaps, now=NOW).decode()
+    md = exports.summary_report_md([], [], fp, gaps, now=NOW)
+    for blob in (h, md):
+        assert "within budget" in blob and "over budget" in blob and "Overall" in blob
+        assert "Not detected (known blind spot)" in blob and "Now detected" in blob
+    assert "**over budget**" in md
+    ok = exports.summary_report_md([], [], fp[:1], [], now=NOW)
+    assert "**within budget**" in ok and "over budget" not in ok
+
+
+def test_fallbacks_and_missing_values():
+    out = exports.evidence_html(make_alert(benign_causes=[], source=None), [], now=NOW).decode()
+    assert "None" not in out and "Source of this alert: unknown" in out
+    assert "opendatacommons.org/licenses/odbl/1-0/" in out and "data/LICENSE-ODbL.md" in out
+    assert "<li>" in out.split("Possible benign causes")[1]  # catalog fallback
+    unknown = exports.summary_report_md([make_alert(detection_id="GT-777")], now=NOW)
+    assert "GT\\-777" in unknown and "1 alerts" in unknown
+
+
+def test_nan_inf_and_bad_timestamps():
+    a = make_alert(first_ts=float("nan"), last_ts=1e30, evidence=[
+        {"field": "gs_kt", "observed": float("nan"), "threshold": float("inf"), "ts": float("inf")}])
+    pts_ = [{"ts": 1e30, "lat": float("nan"), "lon": 1.0}, {"ts": 2.0, "lat": 1.0, "lon": 2.0}]
+    out = exports.evidence_html(a, pts_, now=float("nan")).decode()
+    assert "n/a" in out and "NaN" not in out
+    doc = exports.evidence_json(a, [], now=NOW).decode()
+
+    def boom(c):
+        raise ValueError(c)
+    json.loads(doc, parse_constant=boom)
+    assert exports.evidence_html(make_alert(callsign=chr(0xD800)), [], now=NOW)
+    assert exports.evidence_json(make_alert(callsign=chr(0xD800)), [], now=NOW)
+
+
+def test_injected_title_and_filename():
+    inj, real = make_alert(injected=True), make_alert()
+    assert "<title>[INJECTED] " in exports.evidence_html(inj, [], now=NOW).decode()
+    assert "<title>[INJECTED]" not in exports.evidence_html(real, [], now=NOW).decode()
+    assert "injected" in exports.evidence_filename(inj) and "injected" not in exports.evidence_filename(real)
+    assert exports.evidence_filename(make_alert(icao="../x/y"), "html").endswith(".html")
+    assert "/" not in exports.evidence_filename(make_alert(icao="../x/y"))
+
+
+def test_hostile_severity_icao_detection_id():
+    h = '"><script>x</script>'
+    out = exports.evidence_html(make_alert(severity=h, icao=h, detection_id=h), [], now=NOW).decode()
+    assert "<script" not in out.lower() and 'class="sev-&quot;&gt;' in out
+    title = out.split("<title>")[1].split("</title>")[0]
+    assert "<" not in title and '"' not in title
+    assert "<script" not in exports.summary_report_html([make_alert(detection_id=h)], now=NOW).decode().lower()

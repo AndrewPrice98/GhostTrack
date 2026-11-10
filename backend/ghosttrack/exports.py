@@ -21,34 +21,25 @@ from ghosttrack import __version__
 from ghosttrack.catalog import load_catalog
 from ghosttrack.model import State
 
+LICENCE_REF = "opendatacommons.org/licenses/odbl/1-0/"
 ATTRIBUTION = "ADS-B data from adsb.lol, available under the Open Database License (ODbL) 1.0."
 DISCLAIMER = "Plausibility analysis of decoded ADS-B data; not a certified surveillance system."
 INJECTED_BANNER = "INJECTED TEST DATA \u2014 not real air traffic"
 SOURCE_LABELS = {"recorded": "recorded capture (demo replay)", "live": "live feed"}
 SUMMARY_WINDOW_S = 24 * 3600.0
 
-_UNITS = {
-    "gs_kt": "kt", "speed_kt": "kt", "alt_baro_ft": "ft", "alt_geom_ft": "ft", "altitude_ft": "ft",
-    "baro_rate_fpm": "ft/min", "geom_rate_fpm": "ft/min", "vrate_fpm": "ft/min",
-    "distance_nm": "NM", "jump_nm": "NM", "dt_s": "s", "gap_s": "s", "track_deg": "deg",
-    "turn_rate_dps": "deg/s", "accel_g": "g", "divergence_ft": "ft",
-}
-
-
 def _unit(field: str) -> str:
-    if field in _UNITS:
-        return _UNITS[field]
-    for suffix, unit in (("_kt", "kt"), ("_ft", "ft"), ("_fpm", "ft/min"), ("_nm", "NM"),
-                         ("_s", "s"), ("_deg", "deg"), ("_dps", "deg/s"), ("_g", "g")):
-        if field.endswith(suffix):
-            return unit
-    return ""
+    """Unit of an evidence field, from the catalog's explicit ``evidence_units`` map ("" if none)."""
+    return load_catalog().get("evidence_units", {}).get(str(field), "")
 
 
 def _utc(ts: float | None) -> str:
     if ts is None:
         return "-"
-    return datetime.fromtimestamp(float(ts), timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    try:
+        return datetime.fromtimestamp(float(ts), timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    except (ValueError, OverflowError, OSError, TypeError):
+        return "n/a"  # NaN, infinity or an absurd timestamp
 
 
 def _e(value: Any) -> str:
@@ -61,7 +52,7 @@ def _fmt(value: Any, digits: int = 1) -> str:
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, float):
-        return f"{value:.{digits}f}"
+        return f"{value:.{digits}f}" if math.isfinite(value) else "n/a"
     if isinstance(value, (list, tuple, dict)):
         return json.dumps(value, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
     return str(value)
@@ -87,12 +78,13 @@ def _detection(alert: dict) -> tuple[str, dict]:
 
 
 def _benign(alert: dict, det: dict) -> list[str]:
-    return list(alert.get("benign_causes") or det.get("benign_causes") or [])
+    fallback = det.get("benign_causes") or ([det["false_positive_notes"].strip()] if det.get("false_positive_notes") else [])
+    return list(alert.get("benign_causes") or fallback)
 
 
 def _source_line(alert: dict) -> str:
-    label = SOURCE_LABELS.get(alert.get("source"), alert.get("source"))
-    return f"{ATTRIBUTION} Source of this alert: {label}."
+    label = SOURCE_LABELS.get(alert.get("source")) or alert.get("source") or "unknown"
+    return f"{ATTRIBUTION} Licence: {LICENCE_REF}; see data/LICENSE-ODbL.md. Source of this alert: {label}."
 
 
 # ------------------------------------------------------------------ per-alert pack
@@ -133,7 +125,25 @@ def evidence_json(alert: dict, track_points: Iterable, *, now: float) -> bytes:
         "data_source": _source_line(alert),
         "disclaimer": DISCLAIMER,
     }
-    return json.dumps(doc, indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return json.dumps(_finite(doc), indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8", errors="replace")
+
+
+def evidence_filename(alert: dict, ext: str = "json") -> str:
+    """Suggested download name; contains "injected" for injected test data."""
+    icao = "".join(c for c in str(alert.get("icao") or "fleet") if c.isalnum())[:12] or "fleet"
+    det = "".join(c for c in str(alert["detection_id"]) if c.isalnum() or c == "-")[:12]
+    inj = "-injected" if alert.get("injected") else ""
+    return f"ghosttrack-evidence-{det}-{icao}{inj}.{ext}"
+
+
+def _finite(v: Any) -> Any:
+    if isinstance(v, float) and not math.isfinite(v):
+        return None
+    if isinstance(v, dict):
+        return {k: _finite(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_finite(x) for x in v]
+    return v
 
 
 _CSS = """
@@ -155,7 +165,7 @@ def _page(title: str, body: str) -> bytes:
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f"<style>{_CSS}</style></head><body>\n{body}\n</body></html>\n"
     )
-    return doc.encode("utf-8")
+    return doc.encode("utf-8", errors="replace")
 
 
 def _sketch(pts: list[tuple[float, dict]], w: int = 480, h: int = 240) -> str:
@@ -245,10 +255,14 @@ def evidence_html(alert: dict, track_points: Iterable, *, now: float) -> bytes:
     parts.append(
         f'<p class="small">Generated {_e(_utc(now))} by GhostTrack {_e(__version__)}.<br>{_e(DISCLAIMER)}</p>'
     )
-    return _page(f"GhostTrack evidence {alert['detection_id']} {alert.get('icao') or ''}", "\n".join(parts))
+    return _page(("[INJECTED] " if injected else "") + f"GhostTrack evidence {alert['detection_id']} {alert.get('icao') or ''}", "\n".join(parts))
 
 
 # ------------------------------------------------------------------ summary report
+
+
+class _Trusted(str):
+    """A constant string written by us (not input); Markdown cells leave it unescaped."""
 
 
 def _summary_data(alerts: Sequence[dict], validation: Sequence[Any], gaps: Sequence[Any],
@@ -257,18 +271,24 @@ def _summary_data(alerts: Sequence[dict], validation: Sequence[Any], gaps: Seque
     recent = [a for a in alerts if a["last_ts"] >= now - SUMMARY_WINDOW_S]
     by_det: Counter = Counter(a["detection_id"] for a in recent)
     rows = [(d["id"], d["title"], by_det.get(d["id"], 0)) for d in cat["detections"]]
+    known = {d["id"] for d in cat["detections"]}
+    rows += [(i, "(not in catalog)", n) for i, n in sorted(by_det.items()) if i not in known]
     inj = sum(1 for a in recent if a.get("injected"))
     v = cat["validation"]
+    budget = float(v["fp_budget_per_hour"])
     return {
         "generated": _utc(now), "version": __version__, "window": "last 24 hours",
         "total": len(recent), "injected": inj, "real": len(recent) - inj, "by_detection": rows,
         "scenarios": [(r.scenario, ",".join(r.expected) or "-", ",".join(r.fired) or "-",
-                       "PASS" if r.passed else "FAIL",
+                       _Trusted("PASS" if r.passed else "FAIL"),
                        "-" if r.time_to_detect_s is None else f"{r.time_to_detect_s:.0f} s") for r in validation],
-        "gaps": [(r.scenario, ",".join(r.fired) or "none", "GAP HOLDS" if r.passed else "GAP CLOSED") for r in gaps],
+        "gaps": [(r.scenario, ",".join(r.fired) or "none", _Trusted("Not detected (known blind spot)" if r.passed else "Now detected")) for r in gaps],
         "fps": [(r.recording, f"{r.hours:.2f}", r.tracks, r.counted, f"{r.per_hour:.2f}",
-                 ", ".join(f"{d}/{s}={n}" for (d, s), n in r.counts.items()) or "none") for r in fps],
-        "budget": float(v["fp_budget_per_hour"]), "budget_sev": v["budget_min_severity"],
+                 _Trusted("within budget" if r.per_hour <= budget else "over budget"),
+                 ", ".join(f"{d}/{s}={n}" for (d, s), n in sorted(r.counts.items())) or "none") for r in fps],
+        "overall": ("no measurements" if not fps else
+                    "within budget" if all(r.per_hour <= budget for r in fps) else "over budget"),
+        "budget": budget, "budget_sev": v["budget_min_severity"],
     }
 
 
@@ -288,11 +308,12 @@ def summary_report_html(alerts: Sequence[dict], validation: Sequence[Any] = (), 
         p.append("<h3>Documented gaps (known blind spots)</h3>")
         p.append(_table(["Scenario", "Fired", "Result"], s["gaps"]))
     p.append("<h2>False-positive measurement (clean recordings)</h2>")
-    p.append(f"<p>Budget: {s['budget']:g} findings per hour at severity {_e(s['budget_sev'])} or higher.</p>")
-    p.append(_table(["Recording", "Hours", "Tracks", "Counted", "Per hour", "Findings"], s["fps"])
+    p.append(f"<p>Budget: {s['budget']:g} findings per hour at severity {_e(s['budget_sev'])} or higher. "
+             f"Overall: <strong>{_e(s['overall'])}</strong>.</p>")
+    p.append(_table(["Recording", "Hours", "Tracks", "Counted", "Per hour", "Verdict", "Findings"], s["fps"])
              if s["fps"] else "<p>No measurements available.</p>")
     p.append("<h2>Data sources and licences</h2><ul>"
-             f"<li>{_e(ATTRIBUTION)}</li>"
+             f"<li>{_e(ATTRIBUTION)} Licence: {_e(LICENCE_REF)}; see data/LICENSE-ODbL.md.</li>"
              "<li>Committed recorded captures ship under ODbL; code is MIT.</li>"
              "<li>Natural Earth outlines: public domain.</li>"
              "<li>ICAO address allocation: ICAO Annex 10 Vol III.</li></ul>")
@@ -300,8 +321,16 @@ def summary_report_html(alerts: Sequence[dict], validation: Sequence[Any] = (), 
     return _page("GhostTrack summary report", "\n".join(p))
 
 
+_MD_PUNCT = set("\\`*_{}[]()#+-.!|")
+
+
 def _md(value: Any) -> str:
-    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+    if isinstance(value, _Trusted):
+        return str(value)
+    """Untrusted text for a Markdown table cell: HTML-escape first, then backslash-escape markdown."""
+    text = str(value).replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    text = html.escape(text, quote=False)
+    return "".join("\\" + c if c in _MD_PUNCT else c for c in text)
 
 
 def _md_table(headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> list[str]:
@@ -325,10 +354,11 @@ def summary_report_md(alerts: Sequence[dict], validation: Sequence[Any] = (), fp
         out += ["", "### Documented gaps (known blind spots)", ""]
         out += _md_table(["Scenario", "Fired", "Result"], s["gaps"])
     out += ["", "## False-positive measurement (clean recordings)", "",
-            f"Budget: {s['budget']:g} findings per hour at severity {s['budget_sev']} or higher.", ""]
-    out += (_md_table(["Recording", "Hours", "Tracks", "Counted", "Per hour", "Findings"], s["fps"])
+            f"Budget: {s['budget']:g} findings per hour at severity {s['budget_sev']} or higher. "
+            f"Overall: **{s['overall']}**.", ""]
+    out += (_md_table(["Recording", "Hours", "Tracks", "Counted", "Per hour", "Verdict", "Findings"], s["fps"])
             if s["fps"] else ["No measurements available."])
-    out += ["", "## Data sources and licences", "", f"- {ATTRIBUTION}",
+    out += ["", "## Data sources and licences", "", f"- {ATTRIBUTION} Licence: {LICENCE_REF}; see data/LICENSE-ODbL.md.",
             "- Committed recorded captures ship under ODbL; code is MIT.",
             "- Natural Earth outlines: public domain.", "- ICAO address allocation: ICAO Annex 10 Vol III.", "",
             f"_{DISCLAIMER}_", ""]

@@ -185,6 +185,23 @@ validation:
   budget_floor_per_hour: 1.0
   fp_budget_per_hour: 1.0
 
+# Units of evidence fields, by field name. Fields not listed here (icao, squawk, addresses,
+# new_addresses, nic, nac_p, address_state) carry no unit. Used by the evidence exports.
+evidence_units:
+  gs_kt: kt
+  gs_range_kt: kt
+  alternating_jump_kt: kt
+  implied_speed_kt: kt
+  vertical_rate_fpm: ft/min
+  implied_vertical_rate_fpm: ft/min
+  alt_geom_minus_baro_ft: ft
+  altitude_range_ft: ft
+  acceleration_g: g
+  lateral_acceleration_g: g
+  track_change_deg: deg
+  simultaneous_separation_nm: NM
+  appearance_span_s: s
+
 detections:
   - id: GT-001
     title: Impossible ground speed for the emitter category
