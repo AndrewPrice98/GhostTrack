@@ -5,22 +5,19 @@ import AircraftPanel from '../components/AircraftPanel.jsx'
 import AircraftTable from '../components/AircraftTable.jsx'
 import RadarMap, { Legend } from '../components/RadarMap.jsx'
 import {
-  ErrorState, Icon, Loading, PageHead, usePageTitle, usePageVisible, useReducedMotion, useWide,
+  ErrorState, Icon, Loading, PageHead, usePageTitle, usePageVisible, useReducedMotion, useStoredFlag, useWide,
 } from '../components/ui.jsx'
-import { REFRESH_MS, aircraftName, fmtDuration, fmtTime, nextScenario, plural } from '../lib.js'
+import {
+  MODE_KEY, REFRESH_MS, aircraftName, fmtDuration, fmtTime, nextScenario, plural, readStore, writeStore,
+} from '../lib.js'
 
-const MODE_KEY = 'ghosttrack.mode'
 const HINT_KEY = 'ghosttrack.hint-dismissed'
+const PANEL_KEY = 'ghosttrack.panel-collapsed'
 const MAX_TRAILS = 8
 const TRAIL_WINDOW_S = 15 * 60
 
-function readStore(store, key) {
-  try { return window[store].getItem(key) } catch { return null }
-}
-
-function writeStore(store, key, value) {
-  try { window[store].setItem(key, value) } catch { /* private mode: not remembered */ }
-}
+/** What identifies an aircraft's track: when this changes, its stored trail has changed too. */
+const trackSig = (a) => `${a.lat},${a.lon},${a.alt},${a.on_ground ? 1 : 0}`
 
 function ModeToggle({ mode, onChange }) {
   return (
@@ -112,6 +109,8 @@ export default function LiveMap() {
   const [selected, setSelected] = useState(() => (/^[0-9a-f]{6}$/.test(params.get('select') || '') ? params.get('select') : null))
   const [lastSeen, setLastSeen] = useState(null)
   const [trails, setTrails] = useState({})
+  const trailCache = useRef({}) // icao -> { sig, points }: a trail is fetched again only when the track moved
+  const [collapsed, setCollapsed] = useStoredFlag(PANEL_KEY, false)
   const [scenarios, setScenarios] = useState([])
   const [hintOpen, setHintOpen] = useState(() => readStore('localStorage', HINT_KEY) !== '1')
   const reduced = useReducedMotion()
@@ -154,34 +153,48 @@ export default function LiveMap() {
   const current = data?.aircraft.find((a) => a.icao === selected) || null
   useEffect(() => { if (current) setLastSeen({ ...current, seenAt: data.ts }) }, [current, data])
 
-  // Trails: the selected aircraft and up to eight flagged ones, from their stored track.
-  const trailKey = useMemo(() => {
-    if (!data) return ''
+  // Trails: the selected aircraft and up to eight flagged ones, from their stored track. A trail is
+  // fetched again only when that aircraft's track has changed since the last fetch (not every poll).
+  const wanted = useMemo(() => {
+    if (!data) return []
     const flagged = data.aircraft.filter((a) => a.flagged).slice(0, MAX_TRAILS).map((a) => a.icao)
-    const want = selected && !flagged.includes(selected) ? [...flagged, selected] : flagged
-    return `${data.ts}|${want.join(',')}`
+    return selected && !flagged.includes(selected) ? [...flagged, selected] : flagged
   }, [data, selected])
 
   useEffect(() => {
-    if (!trailKey) return undefined
-    const [ts, list] = trailKey.split('|')
-    const icaos = list ? list.split(',') : []
-    let live = true
+    if (!data) return undefined
+    const byIcao = new Map(data.aircraft.map((a) => [a.icao, a]))
     const flaggedSet = new Set(data.aircraft.filter((a) => a.flagged).map((a) => a.icao))
-    Promise.all(icaos.map((icao) => api.aircraft(icao).then((r) => [icao, r]).catch(() => [icao, null])))
+    const cache = trailCache.current
+    for (const icao of Object.keys(cache)) if (!wanted.includes(icao)) delete cache[icao]
+    const stale = wanted.filter((icao) => {
+      const a = byIcao.get(icao)
+      return !cache[icao] || (a && cache[icao].sig !== trackSig(a))
+    })
+    const publish = () => {
+      const next = {}
+      for (const icao of wanted) {
+        const entry = cache[icao]
+        const points = (entry?.points || []).filter((p) => p.ts >= data.ts - TRAIL_WINDOW_S && p.ts <= data.ts + 1)
+        if (points.length > 1) next[icao] = { points, flagged: flaggedSet.has(icao) }
+      }
+      setTrails(next)
+    }
+    if (!stale.length) {
+      publish()
+      return undefined
+    }
+    let live = true
+    Promise.all(stale.map((icao) => api.aircraft(icao)
+      .then((r) => [icao, { sig: byIcao.get(icao) ? trackSig(byIcao.get(icao)) : '', points: r?.track || [] }])
+      .catch(() => [icao, { sig: '', points: [] }])))
       .then((results) => {
         if (!live) return
-        const next = {}
-        for (const [icao, r] of results) {
-          const points = (r?.track || []).filter((p) => p.ts >= Number(ts) - TRAIL_WINDOW_S && p.ts <= Number(ts) + 1)
-          if (points.length > 1) next[icao] = { points, flagged: flaggedSet.has(icao) }
-        }
-        setTrails(next)
+        for (const [icao, entry] of results) cache[icao] = entry
+        publish()
       })
     return () => { live = false }
-    // data is read for the flagged set only; trailKey already changes with it
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trailKey])
+  }, [data, wanted])
 
   const select = useCallback((icao) => {
     userSelected.current = true
@@ -195,7 +208,21 @@ export default function LiveMap() {
   }, [setParams])
 
   function changeMode(m) {
+    if (m === mode) return
     writeStore('sessionStorage', MODE_KEY, m)
+    // Nothing from the other feed may linger: drop the picture, trails, selection and any reply in flight.
+    seq.current += 1
+    trailCache.current = {}
+    setState({ data: null, error: null, busy: false })
+    setTrails({})
+    setLastSeen(null)
+    userSelected.current = false
+    setSelected(null)
+    setParams((p) => {
+      const next = new URLSearchParams(p)
+      next.delete('select')
+      return next
+    }, { replace: true })
     setMode(m)
   }
 
@@ -207,7 +234,8 @@ export default function LiveMap() {
   const shown = current || (selected && lastSeen?.icao === selected ? lastSeen : null)
   const panel = shown && (
     <AircraftPanel aircraft={current ? { ...current, seenAt: data.ts } : shown} gone={!current}
-      onClose={() => select(null)} focusOnOpen={userSelected.current} />
+      onClose={() => select(null)} focusOnOpen={userSelected.current}
+      collapsed={collapsed} onToggleCollapsed={() => setCollapsed(!collapsed)} />
   )
   const pausedReason = reduced ? 'reduced motion is on, use Refresh' : !visible ? 'tab hidden' : ''
 

@@ -40,7 +40,7 @@ function FailingCheck({ alert }) {
  * Details of the selected aircraft and the checks that failed for it. Focus moves to the panel
  * heading when an aircraft is selected; Escape or the close button returns it.
  */
-export default function AircraftPanel({ aircraft, gone, onClose, focusOnOpen = true }) {
+export default function AircraftPanel({ aircraft, gone, onClose, focusOnOpen = true, collapsed = false, onToggleCollapsed }) {
   const headingRef = useRef(null)
   const opener = useRef(null)
   const [alerts, setAlerts] = useState({ loading: false, items: [], error: null })
@@ -78,7 +78,7 @@ export default function AircraftPanel({ aircraft, gone, onClose, focusOnOpen = t
   const src = sourceOf(aircraft.source)
   const more = (aircraft.alert_ids || []).length - ids.length
   return (
-    <aside className="ac-panel card" aria-labelledby="ac-panel-title"
+    <aside className={`ac-panel card${collapsed ? ' collapsed' : ''}`} aria-labelledby="ac-panel-title"
       onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); close() } }}>
       <header className="ac-panel-head">
         <div>
@@ -90,10 +90,19 @@ export default function AircraftPanel({ aircraft, gone, onClose, focusOnOpen = t
             {!aircraft.flagged && !aircraft.injected && <span className="chip neutral">No alerts</span>}
           </div>
         </div>
-        <button type="button" className="btn ghost small icon-only" onClick={close}>
-          <Icon name="close" /><span className="sr-only">Close aircraft details</span>
-        </button>
+        <div className="panel-tools">
+          {onToggleCollapsed && (
+            <button type="button" className="btn ghost small icon-only panel-toggle" onClick={onToggleCollapsed}
+              aria-expanded={!collapsed} aria-controls="ac-panel-body">
+              <Icon name="chevron" /><span className="sr-only">{collapsed ? 'Expand aircraft details' : 'Collapse aircraft details'}</span>
+            </button>
+          )}
+          <button type="button" className="btn ghost small icon-only" onClick={close}>
+            <Icon name="close" /><span className="sr-only">Close aircraft details</span>
+          </button>
+        </div>
       </header>
+      <div id="ac-panel-body" className="panel-body" hidden={collapsed}>
       {gone && <p className="state small" role="status">No longer in the feed. Showing the last report.</p>}
       {aircraft.injected && <p className="injected-banner small">{INJECTED_NOTICE}</p>}
       <dl className="kv">
@@ -132,8 +141,9 @@ export default function AircraftPanel({ aircraft, gone, onClose, focusOnOpen = t
         )}
       </section>
       <p className="panel-foot small">
-        <Link to={`/aircraft/${aircraft.icao}`}>Track history and profile <Icon name="arrow" size={14} /></Link>
+        <Link to={`/aircraft/${encodeURIComponent(aircraft.icao)}`}>Track history and profile <Icon name="arrow" size={14} /></Link>
       </p>
+      </div>
     </aside>
   )
 }

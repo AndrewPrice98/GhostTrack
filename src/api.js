@@ -11,7 +11,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, options = {}) {
+async function request(path, options = {}, parse = 'json') {
   let res
   try {
     res = await fetch(`/api${path}`, { credentials: 'same-origin', ...options })
@@ -34,7 +34,7 @@ async function request(path, options = {}) {
     }
     throw new ApiError(detail, res.status)
   }
-  return res.json()
+  return parse === 'text' ? res.text() : res.json()
 }
 
 const send = (method, body) => ({
@@ -66,11 +66,21 @@ export const api = {
   alerts: (params = {}) => request(`/alerts${qs(params)}`),
   alert: (id) => request(`/alerts/${enc(id)}`),
   detections: () => request('/detections'),
+  validation: () => request('/validation'),
   scenarios: () => request('/scenarios'),
+  replay: (name, signal) => request(`/scenarios/${enc(name)}/replay`, { signal }),
+  /** The Markdown summary report as text, for the preview. */
+  summaryText: (signal) => request('/reports/summary.md', { signal }, 'text'),
   /** Same-origin download links; the session cookie goes with them. */
   evidenceUrl: (id, ext) => `/api/alerts/${enc(id)}/evidence.${ext}`,
   reportUrl: (ext) => `/api/reports/summary.${ext}`,
 
   // Writer-only; the server answers 403 for guests.
   triage: (id, body) => request(`/alerts/${enc(id)}`, send('PATCH', body)),
+  /** Multipart upload; the browser sets the content type and boundary. */
+  upload: (file) => {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    return request('/recordings', { method: 'POST', body: form })
+  },
 }

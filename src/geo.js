@@ -129,3 +129,32 @@ export function fitBox(points, { pad = 0.15, minSpan = 6, aspect = 1.6 } = {}) {
   const cy = (y0 + y1) / 2
   return { x: cx - w / 2, y: cy - h / 2, w, h }
 }
+
+/**
+ * Where to put a text label for one end of a track so that it clears the line: on the side away
+ * from the neighbouring point along the track, both across and along it, and flipped back inside
+ * `box` when it would run off an edge. `anchor` and `neighbour` are {x, y} in map units; `textW`
+ * is the label width, `gap` the horizontal clearance and `lift` the vertical offset from the line
+ * (both map units), `size` the font size. Returns {x, y, textAnchor} for an SVG <text>.
+ */
+export function labelPlacement(anchor, neighbour, { box, textW, gap, lift, size }) {
+  const dx = neighbour ? neighbour.x - anchor.x : 0
+  const dy = neighbour ? neighbour.y - anchor.y : 0
+  let right = dx <= 0 // the track leaves to the left (or nowhere): the label goes right
+  const fitsRight = anchor.x + gap + textW <= box.x + box.w
+  const fitsLeft = anchor.x - gap - textW >= box.x
+  if (right && !fitsRight && fitsLeft) right = false
+  else if (!right && !fitsLeft && fitsRight) right = true
+  const above = dy > 0 // the neighbour is below, so the label goes above the line
+  return {
+    x: right ? anchor.x + gap : anchor.x - gap,
+    y: above ? anchor.y - lift : anchor.y + lift + size * 0.7,
+    textAnchor: right ? 'start' : 'end',
+  }
+}
+
+/** A view (zoom and centre) that shows the box {x, y, w, h} within the base map's extent. */
+export function viewForBox(box, base) {
+  const z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.min(base.w / box.w, base.h / box.h)))
+  return clampView({ z, cx: box.x + box.w / 2, cy: box.y + box.h / 2 }, base)
+}

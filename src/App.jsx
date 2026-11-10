@@ -3,11 +3,17 @@ import { BrowserRouter, NavLink, Route, Routes, useLocation } from 'react-router
 import { api } from './api.js'
 import { Empty, ErrorState, Icon, Loading, SessionContext, usePageTitle, useSession } from './components/ui.jsx'
 import { ATTRIBUTION, DISCLAIMER, GITHUB_URL } from './lib.js'
+import Aircraft from './pages/Aircraft.jsx'
+import AircraftDetail from './pages/AircraftDetail.jsx'
 import AlertDetail from './pages/AlertDetail.jsx'
 import Alerts from './pages/Alerts.jsx'
+import Detections from './pages/Detections.jsx'
 import LiveMap from './pages/LiveMap.jsx'
 import Login from './pages/Login.jsx'
-import Placeholder from './pages/Placeholder.jsx'
+import Reports from './pages/Reports.jsx'
+import ScenarioPlayer from './pages/ScenarioPlayer.jsx'
+import Scenarios from './pages/Scenarios.jsx'
+import Upload from './pages/Upload.jsx'
 
 const NAV = [
   ['/', 'Live map'],
@@ -77,7 +83,9 @@ function NotFound() {
 }
 
 function Shell({ onLogout }) {
-  const { version } = useSession()
+  const { version, guest } = useSession()
+  // The recording upload is for the admin only; guests never see the link.
+  const nav = guest ? NAV : [...NAV, ['/admin/upload', 'Upload']]
   const mainRef = useRef(null)
   useFocusOnNavigate(mainRef)
   return (
@@ -88,7 +96,7 @@ function Shell({ onLogout }) {
           <Brand />
           <nav className="nav" aria-label="Main">
             <ul>
-              {NAV.map(([to, label]) => (
+              {nav.map(([to, label]) => (
                 <li key={to}><NavLink to={to} end={to === '/'}>{label}</NavLink></li>
               ))}
             </ul>
@@ -107,11 +115,13 @@ function Shell({ onLogout }) {
           <Route path="/" element={<LiveMap />} />
           <Route path="/alerts" element={<Alerts />} />
           <Route path="/alerts/:alertId" element={<AlertDetail />} />
-          <Route path="/aircraft" element={<Placeholder page="aircraft" />} />
-          <Route path="/aircraft/:icao" element={<Placeholder page="aircraft" />} />
-          <Route path="/detections" element={<Placeholder page="detections" />} />
-          <Route path="/scenarios" element={<Placeholder page="scenarios" />} />
-          <Route path="/reports" element={<Placeholder page="reports" />} />
+          <Route path="/aircraft" element={<Aircraft />} />
+          <Route path="/aircraft/:icao" element={<AircraftDetail />} />
+          <Route path="/detections" element={<Detections />} />
+          <Route path="/scenarios" element={<Scenarios />} />
+          <Route path="/scenarios/:name" element={<ScenarioPlayer />} />
+          <Route path="/reports" element={<Reports />} />
+          <Route path="/admin/upload" element={<Upload />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { fitBox, glyphTransform, polylineD, trailSegments } from '../geo.js'
+import { fitBox, glyphTransform, labelPlacement, polylineD, trailSegments } from '../geo.js'
 import { aircraftName, fmtTime } from '../lib.js'
 import { BaseLayers, HatchDefs, PLANE, project } from './RadarMap.jsx'
 
@@ -9,7 +9,7 @@ const ASPECT = 1.7
  * A small static map of an alert's track: the base map zoomed to the track, the track drawn as a
  * line, start and end marked, and the reports cited as evidence highlighted in red.
  */
-export default function TrackMini({ alert }) {
+export default function TrackMini({ alert, empty }) {
   const prefix = useId().replace(/:/g, '')
   const ref = useRef(null)
   const [width, setWidth] = useState(640) // drawn width in px: glyphs and labels keep their pixel size
@@ -24,8 +24,7 @@ export default function TrackMini({ alert }) {
   if (points.length === 0) {
     return (
       <p className="state small">
-        No track points are stored for this alert (the replay keeps a rolling 30-minute window). The failing checks
-        above are still the evidence.
+        {empty || 'No track points are stored for this alert (the replay keeps a rolling 30-minute window). The failing checks above are still the evidence.'}
       </p>
     )
   }
@@ -40,12 +39,15 @@ export default function TrackMini({ alert }) {
   const [lx, ly] = project(last.lat, last.lon)
   const [fx, fy] = project(first.lat, first.lon)
   const name = aircraftName(alert)
-  // Labels go left of their point when they would run off the right edge.
+  // Labels sit off the line, on the side away from the neighbouring report, and inside the map.
   const textW = (text) => text.length * 12 * 0.62 * unit
   const endLabel = `${name} ${fmtTime(last.ts)}`
   const startLabel = `Start ${fmtTime(first.ts)}`
-  const endLeft = lx + unit * 17 + textW(endLabel) > box.x + box.w
-  const startLeft = fx + unit * 9 + textW(startLabel) > box.x + box.w
+  const pt = ([x, y]) => ({ x, y })
+  const place = (anchor, neighbour, text, gap, lift) => labelPlacement(pt(anchor), neighbour ? pt(neighbour) : null,
+    { box, textW: textW(text), gap: unit * gap, lift: unit * lift, size: unit * 12 })
+  const endAt = place([lx, ly], xy.length > 1 ? xy[xy.length - 2] : null, endLabel, 17, 18)
+  const startAt = place([fx, fy], xy.length > 1 ? xy[1] : null, startLabel, 9, 12)
   const injected = alert.injected
   const desc = `Track of ${name}: ${points.length} reports from ${fmtTime(first.ts)} to ${fmtTime(last.ts)}`
     + `${hits.length ? `, ${hits.length} of them cited as evidence (red)` : ''}.${injected ? ' Injected test data.' : ''}`
@@ -69,10 +71,10 @@ export default function TrackMini({ alert }) {
           <path className="glyph" d={PLANE} transform={glyphTransform(lx, ly, last.track, unit * 10)}
             fill={injected ? `url(#${prefix}-hatch-adsb)` : undefined} vectorEffect="non-scaling-stroke" />
         </g>
-        <text className="mini-label" x={startLeft ? fx - unit * 9 : fx + unit * 9} y={fy + unit * 4} fontSize={unit * 12}
-          strokeWidth={unit * 3} textAnchor={startLeft ? 'end' : 'start'}>{startLabel}</text>
-        <text className="mini-label" x={endLeft ? lx - unit * 17 : lx + unit * 17} y={ly + unit * 4} fontSize={unit * 12}
-          strokeWidth={unit * 3} textAnchor={endLeft ? 'end' : 'start'}>{endLabel}</text>
+        <text className="mini-label" x={startAt.x} y={startAt.y} fontSize={unit * 12}
+          strokeWidth={unit * 3} textAnchor={startAt.textAnchor}>{startLabel}</text>
+        <text className="mini-label" x={endAt.x} y={endAt.y} fontSize={unit * 12}
+          strokeWidth={unit * 3} textAnchor={endAt.textAnchor}>{endLabel}</text>
       </svg>
       <figcaption className="small muted">
         {points.length} reports, {fmtTime(first.ts)} to {fmtTime(last.ts)}. Ring: last position. Hollow circle: first report.

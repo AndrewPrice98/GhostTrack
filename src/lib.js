@@ -9,6 +9,18 @@ export const REFRESH_MS = 10_000
 export const DEMO_CYCLE_S = 3600
 export const FLAG_WINDOW_MIN = 10
 
+// -- browser storage (always guarded: private mode and blocked storage must not break the page) --
+
+export function readStore(store, key) {
+  try { return window[store].getItem(key) } catch { return null }
+}
+
+export function writeStore(store, key, value) {
+  try { window[store].setItem(key, value) } catch { /* not remembered */ }
+}
+
+export const MODE_KEY = 'ghosttrack.mode'
+
 // -- vocabulary: every value has a text label (colour is never the only cue) ------------------
 
 /** Position source of a report (readsb `type`, `mlat` and `tisb` fields). */
@@ -264,14 +276,6 @@ export function matchesQuery(item, query) {
 
 export function filterAircraft(list, { query = '', flaggedOnly = false } = {}) {
   return (list || []).filter((a) => (!flaggedOnly || a.flagged) && matchesQuery(a, query))
-}
-
-/** Alerts matching a callsign/hex search (a ghost flood also matches any of its addresses). */
-export function searchAlerts(list, query) {
-  const q = String(query || '').trim().toLowerCase()
-  if (!q) return list || []
-  return (list || []).filter((a) => matchesQuery(a, q)
-    || (a.evidence || []).some((e) => Array.isArray(e.observed) && e.observed.some((v) => String(v).toLowerCase().includes(q))))
 }
 
 // -- demo schedule -------------------------------------------------------------------------------

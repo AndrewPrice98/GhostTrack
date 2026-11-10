@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   aircraftName, alertSubject, categoryLabel, evidenceRows, filterAircraft, fmtAgo, fmtAlt, fmtDateTime, fmtTime,
-  fmtTrack, fmtValue, nextScenario, searchAlerts, sortAircraft, sourceOf,
+  fmtTrack, fmtValue, nextScenario, readStore, sortAircraft, sourceOf, writeStore,
 } from './lib.js'
 
 const fleet = [
@@ -36,16 +36,6 @@ test('filterAircraft searches callsign and hex, case-insensitively, and can show
   assert.deepEqual(ids(filterAircraft(fleet, { query: '  ' })), ids(fleet))
   assert.deepEqual(ids(filterAircraft(fleet, { flaggedOnly: true })), ['a2', 'a4'])
   assert.deepEqual(ids(filterAircraft(fleet, { query: 'ual', flaggedOnly: true })), ['a4'])
-})
-
-test('searchAlerts matches callsign, hex and ghost-flood member addresses', () => {
-  const alerts = [
-    { id: 1, icao: 'adfbb1', callsign: 'ALT1' },
-    { id: 2, icao: null, callsign: null, evidence: [{ field: 'addresses', observed: ['adf900', 'adf901'] }] },
-  ]
-  assert.deepEqual(searchAlerts(alerts, 'alt').map((a) => a.id), [1])
-  assert.deepEqual(searchAlerts(alerts, 'ADF901').map((a) => a.id), [2])
-  assert.deepEqual(searchAlerts(alerts, '').map((a) => a.id), [1, 2])
 })
 
 test('names and labels', () => {
@@ -110,4 +100,22 @@ test('nextScenario finds the next injected scenario in the hourly demo cycle', (
   assert.deepEqual(nextScenario(scenarios, hour + 3000), { scenario: scenarios[1], inSeconds: 900 })
   assert.equal(nextScenario([], hour), null)
   assert.equal(nextScenario(scenarios, undefined), null)
+})
+
+test('browser storage helpers never throw when storage is missing or blocked', () => {
+  const had = globalThis.window
+  try {
+    globalThis.window = undefined // no window at all
+    assert.equal(readStore('localStorage', 'k'), null)
+    assert.doesNotThrow(() => writeStore('localStorage', 'k', '1'))
+    globalThis.window = { localStorage: { getItem() { throw new Error('blocked') }, setItem() { throw new Error('blocked') } } }
+    assert.equal(readStore('localStorage', 'k'), null)
+    assert.doesNotThrow(() => writeStore('localStorage', 'k', '1'))
+    const mem = new Map()
+    globalThis.window = { localStorage: { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v) } }
+    writeStore('localStorage', 'k', '1')
+    assert.equal(readStore('localStorage', 'k'), '1')
+  } finally {
+    globalThis.window = had
+  }
 })

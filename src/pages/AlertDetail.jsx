@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../api.js'
 import TrackMini from '../components/TrackMini.jsx'
 import {
-  ErrorState, FormMessage, Icon, InjectedTag, Loading, SeverityChip, StatusChip, useAsync, usePageTitle, useSession,
+  ErrorState, FormMessage, Icon, Loading, OriginTag, SeverityChip, StatusChip, useAsync, usePageTitle, useSession,
 } from '../components/ui.jsx'
 import {
   ATTRIBUTION, INJECTED_NOTICE, STATUS, TRIAGE_OPTIONS, alertSubject, evidenceRows, fmtDateTime, fmtTime,
@@ -118,11 +118,16 @@ export default function AlertDetail() {
           <div className="chips">
             <SeverityChip severity={alert.severity} />
             <StatusChip status={alert.status} />
-            {alert.injected && <InjectedTag />}
+            <OriginTag item={alert} />
           </div>
         </div>
       </header>
-      {alert.injected && <p className="injected-banner">{INJECTED_NOTICE}</p>}
+      {alert.source === 'upload' ? (
+        <p className="injected-banner upload-banner">
+          {alert.label}: this alert comes from a recording the admin uploaded. The file is not verified
+          {alert.injected ? ', and its injected-test-data flag is the uploader’s own claim' : ''}.
+        </p>
+      ) : alert.injected && <p className="injected-banner">{INJECTED_NOTICE}</p>}
 
       <div className="detail-grid">
         <div className="detail-main">
@@ -198,8 +203,8 @@ export default function AlertDetail() {
             </dl>
             {alert.icao && (
               <p className="small links">
-                <Link to={`/?select=${alert.icao}`}><Icon name="map" size={14} /> Find on the live map</Link>
-                <Link to={`/aircraft/${alert.icao}`}><Icon name="plane" size={14} /> Aircraft history</Link>
+                <Link to={`/?select=${encodeURIComponent(alert.icao)}`}><Icon name="map" size={14} /> Find on the live map</Link>
+                <Link to={`/aircraft/${encodeURIComponent(alert.icao)}`}><Icon name="plane" size={14} /> Aircraft history</Link>
               </p>
             )}
           </section>

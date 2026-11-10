@@ -121,11 +121,12 @@ function Aircraft({ a, size, unit, selected, onSelect, prefix, showLabel }) {
  * zoom by buttons, keyboard (+ / - / arrows / 0) and wheel, and drag with a mouse. Aircraft are
  * selected by clicking a glyph; the aircraft list next to the map offers the same by keyboard.
  */
-export default function RadarMap({ aircraft, selected, onSelect, trails = {}, summary, overlay }) {
+export default function RadarMap({ aircraft, selected, onSelect, trails = {}, summary, overlay, initialView }) {
   const prefix = useId().replace(/:/g, '')
   const wrapRef = useRef(null)
   const svgRef = useRef(null)
-  const [view, setView] = useState(() => homeView(BASE))
+  const home = useMemo(() => initialView || homeView(BASE), [initialView])
+  const [view, setView] = useState(home)
   const [width, setWidth] = useState(800)
   const drag = useRef(null)
   const helpId = `${prefix}-help`
@@ -183,7 +184,8 @@ export default function RadarMap({ aircraft, selected, onSelect, trails = {}, su
   }, [selected])
 
   const zoom = (f) => setView((v) => zoomAt(v, f, BASE))
-  const reset = () => setView(homeView(BASE))
+  const reset = () => setView(home)
+  const atHome = Math.abs(view.z - home.z) < 1e-6 && Math.abs(view.cx - home.cx) < 1e-6 && Math.abs(view.cy - home.cy) < 1e-6
 
   function onKeyDown(e) {
     if (e.target.closest?.('.ac-panel')) return // keys inside the details panel are its own
@@ -275,14 +277,14 @@ export default function RadarMap({ aircraft, selected, onSelect, trails = {}, su
             aria-label="Zoom in" title="Zoom in (+)"><Icon name="plus" /></button>
           <button type="button" className="map-btn" onClick={() => zoom(1 / 1.5)} disabled={view.z <= ZOOM_MIN}
             aria-label="Zoom out" title="Zoom out (−)"><Icon name="minus" /></button>
-          <button type="button" className="map-btn" onClick={reset} disabled={view.z === 1}
+          <button type="button" className="map-btn" onClick={reset} disabled={atHome}
             aria-label="Reset view" title="Reset view (0)"><Icon name="home" /></button>
         </div>
         <div className="radar-north" aria-hidden="true"><span>N</span></div>
         {summary && <div className="radar-summary" aria-hidden="true">{summary}</div>}
         <p className="radar-attrib">ADS-B data: adsb.lol, ODbL · Map: Natural Earth</p>
         {overlay}
-        <span className="sr-only" role="status">{view.z === 1 ? '' : `Zoom ${pct} percent`}</span>
+        <span className="sr-only" role="status">{atHome ? '' : `Zoom ${pct} percent`}</span>
       </div>
       <p id={helpId} className="radar-help">
         <span className="kbd-hint">Focus the map, then <kbd>+</kbd> <kbd>−</kbd> to zoom, arrow keys to pan, <kbd>0</kbd> to reset.</span>{' '}

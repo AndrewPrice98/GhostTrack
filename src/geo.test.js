@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  ZOOM_MAX, clampView, fitBox, glyphTransform, homeView, makeProjection, normalizeTrack, panBy, polylineD,
-  trailSegments, viewBoxOf, zoomAt,
+  ZOOM_MAX, clampView, fitBox, glyphTransform, homeView, labelPlacement, makeProjection, normalizeTrack, panBy, polylineD,
+  trailSegments, viewBoxOf, viewForBox, zoomAt,
 } from './geo.js'
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`)
@@ -104,4 +104,37 @@ test('polylineD and fitBox', () => {
   assert.deepEqual(box, { x: 0, y: -2.5, w: 10, h: 5 })
   const tiny = fitBox([[5, 5]], { pad: 0, minSpan: 6, aspect: 1.5 })
   near(tiny.w, 6); near(tiny.h, 4); near(tiny.x, 2)
+})
+
+test('labelPlacement keeps the label off the line, on the side away from the neighbouring point', () => {
+  const box = { x: 0, y: 0, w: 100, h: 60 }
+  const opts = { box, textW: 20, gap: 4, lift: 6, size: 5 }
+  // the track arrives from the left and from below: the label goes right of and above the end point
+  const a = labelPlacement({ x: 50, y: 30 }, { x: 40, y: 38 }, opts)
+  assert.equal(a.textAnchor, 'start')
+  assert.ok(a.x > 50 && a.y < 30)
+  // the track arrives from the right and from above: the label goes left of and below the point
+  const b = labelPlacement({ x: 50, y: 30 }, { x: 60, y: 22 }, opts)
+  assert.equal(b.textAnchor, 'end')
+  assert.ok(b.x < 50 && b.y > 30)
+  // label and neighbour lie on opposite sides of the anchor, both across and along the line
+  assert.ok((a.x - 50) * (40 - 50) < 0 && (a.y - 30) * (38 - 30) < 0)
+  assert.ok((b.x - 50) * (60 - 50) < 0 && (b.y - 30) * (22 - 30) < 0)
+})
+
+test('labelPlacement flips back inside the box and copes with a single point', () => {
+  const box = { x: 0, y: 0, w: 100, h: 60 }
+  const opts = { box, textW: 30, gap: 4, lift: 6, size: 5 }
+  assert.equal(labelPlacement({ x: 90, y: 30 }, { x: 80, y: 30 }, opts).textAnchor, 'end') // wanted right, off the edge
+  assert.equal(labelPlacement({ x: 8, y: 30 }, { x: 20, y: 30 }, opts).textAnchor, 'start') // wanted left, off the edge
+  assert.equal(labelPlacement({ x: 50, y: 30 }, null, opts).textAnchor, 'start')
+})
+
+test('viewForBox zooms to a box and stays inside the base map', () => {
+  const v = viewForBox({ x: -10, y: -8, w: 20, h: 16 }, base)
+  near(v.z, 10)
+  near(v.cx, 0); near(v.cy, 0)
+  assert.equal(viewForBox({ x: -400, y: -400, w: 800, h: 800 }, base).z, 1)
+  const corner = viewForBox({ x: 90, y: 70, w: 10, h: 8 }, base)
+  assert.ok(corner.cx + base.w / corner.z / 2 <= base.x + base.w + 1e-9)
 })

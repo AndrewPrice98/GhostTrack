@@ -222,7 +222,7 @@ Sources: OpenAPI document at https://api.adsb.lol/api/openapi.json (fetched 2026
 - **Refresh:** every 10 s; paused while the tab is hidden (Page Visibility) and under `prefers-reduced-motion` (then a Refresh button only); an immediate refresh when the tab returns. Live mode is opt-in per session (sessionStorage); the browser only ever talks to GhostTrack.
 - **Alert queue:** filters are server-side and kept in the URL; the callsign/hex search runs over the alerts loaded so far (50 per page, "Load more"), and says so. Detection titles for the filter are a short static list in `src/lib.js` (the catalog endpoint also computes validation, which is slow on a cold start).
 - **Evidence wording:** `src/lib.js` maps each evidence field to a plain-language name and a comparison kind (ceiling, band, floor, steady, match), giving lines such as "1.7x the 800 kt ceiling" or "outside the +/-3,450 ft band"; unknown fields fall back to their name.
-- **Pages for Task 9** (Aircraft, Detections, Scenarios, Reports) are placeholders that link to the live map, the alert queue and the report downloads, so no navigation ends in a 404.
+- **Pages for Task 9** were placeholders here; see section 12.
 
 ## 11. REST API (Task 7)
 
@@ -233,3 +233,14 @@ Sources: OpenAPI document at https://api.adsb.lol/api/openapi.json (fetched 2026
 - **Live mode.** `mode=live` is allowed only when `GHOSTTRACK_LIVE=true` (default: on in demo mode, off otherwise), so a self-hosted install makes no upstream requests until the operator opts in; otherwise 403. `/api/live` is the only route with the traffic `Cache-Control`; it also sends `Vary: Cookie`. Every other response is `no-store`.
 - **API description.** `/api/openapi.json` is writer-only (the cookie is scoped to `/api`); `/docs` and `/redoc` are off in demo mode.
 - **Search.** `GET /api/alerts?q=` matches callsign or address substrings (parameterised LIKE, wildcards escaped), over all alerts.
+
+## 12. Dashboard part 2 (Task 9)
+
+- **Pages:** Aircraft (index of the current picture plus a hex look-up, `/aircraft`), Aircraft detail (`/aircraft/:icao`: altitude and ground-speed charts, track map, identity and registration facts, findings), Detections (catalog with rationale, thresholds, FP notes, benign causes, references; validation tables; false-positive budget), Scenarios (cards) and the player (`/scenarios/:name`), Reports (downloads plus a rendered preview) and Upload (`/admin/upload`, writers only; guests see "Admin only" and no nav link). The Placeholder page is gone.
+- **No hard-coded thresholds.** The Detections page renders `thresholds`, budget, verdicts and results exactly as the API returns them (`humanKey`/`fmtThreshold` only format). The static detection id/title list in `lib.js` still feeds the alert filter only.
+- **Charts** are hand-rolled SVG (`LineChart.jsx`, `charts.js`): nice axes, gaps over 5 minutes break the line, injected points hollow, findings shade their time window, a pointer/arrow-key read-out, a text summary and a data table. The false-positive chart is a bar SVG with the budget line.
+- **Player timing.** Frames come from the precomputed replay, trimmed to the frames that hold aircraft (plus 3). The expected detection fires at injection + the validated `time_to_detect_s` (the checks need more than one report); other findings fire at their first flagged report. Playback autostarts unless `prefers-reduced-motion`, which starts paused and steps one still picture every 1.5 s; Play/Pause/step/restart/scrubber/speed are native controls. The map zooms to the scenario's extent.
+- **Report preview** renders the Markdown download with a small safe parser (`replay.js`): React elements only, no `innerHTML`. The HTML report is download-only because it is served as an attachment with its own CSP.
+- **Uploads.** 403, 413 and other errors are mapped to plain messages; the API's `label` ("Uploaded recording (unverified)", "Injected test data (as declared by upload)") is shown as given (`OriginTag`).
+- **Empty database.** Alerts and Aircraft show a call to action: a button to the upload for writers, an explanation for guests. All data routes' 503 shows a "Not ready yet" state with Retry.
+- **Task 8 follow-ups:** live side panel narrower (296 px) and collapsible (`aria-expanded`, remembered in `localStorage`, guarded); alert search uses `GET /api/alerts?q=` (32 chars, 250 ms debounce, URL is the source of truth); trails are refetched only when the aircraft's position/altitude changed since the last fetch; switching replay/live clears picture, trails, selection and in-flight replies; ICAO values in links are `encodeURIComponent`-ed; mini-track labels are placed off the line on the side away from the neighbouring report (`labelPlacement`).
