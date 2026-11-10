@@ -236,3 +236,10 @@ def test_health_reports_the_upload_limit(monkeypatch):
     monkeypatch.setenv("GHOSTTRACK_DEMO", "true")
     monkeypatch.setenv("GHOSTTRACK_MAX_UPLOAD_MB", "50")
     assert c.get("/api/health").json()["max_upload_mb"] == 4  # the demo is capped
+
+
+def test_vercel_caps_the_upload_limit(monkeypatch):
+    monkeypatch.setenv("GHOSTTRACK_MAX_UPLOAD_MB", "50")
+    monkeypatch.setenv("VERCEL", "1")  # Vercel Functions refuse bodies over 4.5 MB
+    assert config.max_upload_bytes() == 4 * 1024 * 1024
+    assert TestClient(app).get("/api/health").json()["max_upload_mb"] == 4

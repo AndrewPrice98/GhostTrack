@@ -99,13 +99,13 @@ def live_interval_s() -> float:
 
 
 def max_upload_bytes() -> int:
-    """Largest accepted upload: 10 MB locally, at most 4 MB on the hosted demo."""
+    """Largest accepted upload: 10 MB locally, at most 4 MB on the hosted demo or on Vercel."""
     try:
         mb = float(os.environ.get("GHOSTTRACK_MAX_UPLOAD_MB", "10"))
     except ValueError:
         mb = 10.0
-    if demo_mode():
-        mb = min(mb, 4.0)
+    if demo_mode() or os.environ.get("VERCEL"):
+        mb = min(mb, 4.0)  # Vercel Functions refuse request bodies over 4.5 MB before the app sees them
     return int(max(0.1, mb) * 1024 * 1024)
 
 

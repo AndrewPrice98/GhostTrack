@@ -13,14 +13,15 @@ const REASONS = {
   duplicate: 'duplicate address in one snapshot',
 }
 
-function explain(err) {
+function explain(err, maxMb) {
+  const platform = Number.isFinite(maxMb) ? ` If the file is larger than ${fmtNumber(maxMb, 1)} MB, the hosting platform may have refused it before the app saw it.` : ''
   switch (err.status) {
     case 403: return 'Only the admin can upload recordings. Sign in as admin first.'
-    case 413: return `${err.message}. Cut the recording into shorter parts, or gzip it, and try again.`
+    case 413: return `${err.message}. Cut the recording into shorter parts, or gzip it, and try again.${platform}`
     case 415: return `${err.message}. Upload a text recording (.jsonl) or a gzip of one (.jsonl.gz).`
     case 429: return 'Too many requests. Wait a moment and try again.'
     case 503: return `${err.message}. The service is not ready; try again shortly.`
-    case 0: return err.message
+    case 0: return `${err.message}${platform} Try a smaller or gzipped file.`
     default: return `Not uploaded: ${err.message}`
   }
 }
@@ -115,7 +116,7 @@ export default function Upload() {
       setFile(null)
       if (input.current) input.current.value = ''
     } catch (err) {
-      setMessage({ tone: 'error', text: explain(err) })
+      setMessage({ tone: 'error', text: explain(err, maxUploadMb) })
     } finally {
       setBusy(false)
     }

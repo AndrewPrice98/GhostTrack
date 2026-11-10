@@ -162,7 +162,7 @@ The deployment is done by the owner; nothing in this repository deploys itself. 
 - The demo data is precomputed offline by `scripts/build_demo.py`; the function only reads it and answers 503 if the fixture is missing or stale. Re-run the script and commit after any change to the recordings, the catalog or the detections (CI checks it).
 - The database lives in `/tmp` and is seeded lazily per function instance, so each instance has its own copy. In demo mode an admin's changes (triage, uploads) are therefore visible to other visitors on that instance until it recycles; the UI says so beside the admin controls.
 - Admin login exists only if the owner sets `GHOSTTRACK_ADMIN_PASSWORD_HASH` and `GHOSTTRACK_SECRET_KEY` in the Vercel project settings. Without them everyone is a read-only guest.
-- Uploads are capped at 4 MB (Vercel caps request bodies at 4.5 MB).
+- Uploads are capped at 4 MB in demo mode and whenever the `VERCEL` variable is set, under Vercel Functions' 4.5 MB request body limit ([Vercel limits](https://vercel.com/docs/functions/limitations#request-body-size)). `/api/health` reports the effective cap, and the upload form checks size first and explains a platform-level refusal, which may not be the app's own JSON 413.
 
 ## Architecture
 
@@ -193,7 +193,7 @@ flowchart LR
 
 ## Tests
 
-Last full run: **529 backend tests** (pytest, 0 skipped, about 2.5 minutes) and **41 frontend tests** (`node --test`, pure logic: geometry, formatting, charts, replay), all passing; the production build succeeds. The backend suite covers the detections and their catalog thresholds, the scenarios, the tracker, ingest, the API and auth, uploads, the demo replay, the exports, the Vercel entry point and this README's validation block.
+Last full run: **530 backend tests** (pytest, 0 skipped, about 2.5 minutes) and **41 frontend tests** (`node --test`, pure logic: geometry, formatting, charts, replay), all passing; the production build succeeds. The backend suite covers the detections and their catalog thresholds, the scenarios, the tracker, ingest, the API and auth, uploads, the demo replay, the exports, the Vercel entry point and this README's validation block.
 
 ```bash
 cd backend && python -m pytest -q -rs    # -rs names any skipped test
